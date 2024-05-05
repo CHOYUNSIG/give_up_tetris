@@ -9,6 +9,9 @@ Matrix = list[list[int]]
 
 
 class TetrisMap:
+    """
+    테트리스 게임 판
+    """
     height: Final[int] = 30
     width: Final[int] = 10
     down_gap_ns: Final[int] = 10 ** 6
@@ -136,6 +139,9 @@ class TetrisMap:
 
 
 class TetrisBlock:
+    """
+    테트리스 블록
+    """
     general_form: Final[list[Matrix]] = [
         [
             [0, 1, 0, 0],
