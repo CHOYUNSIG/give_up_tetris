@@ -1,7 +1,8 @@
 from time import perf_counter_ns
 from copy import deepcopy
 from typing import Final
-from random import randrange
+from random import randrange, shuffle
+from math import cos, sin, pi
 from collections import deque
 
 Point = tuple[int, int]
@@ -13,17 +14,18 @@ class TetrisMap:
     테트리스 게임 판
     """
     height: Final[int] = 30
+    spawn_height: Final[int] = 6
     width: Final[int] = 10
-    down_gap_ns: Final[int] = 10 ** 6
 
     def __init__(self, key_list: list[int]):
         self.map = [[0] * TetrisMap.width for _ in range(TetrisMap.height)]  # 게임판
-        self.moving_blocks: dict[int: TetrisBlock] = dict()  # 현재 움직이고 있는 블록
-        self.queued_blocks: dict[int: deque] = dict()  # 블록 대기열
+        self.moving_blocks: dict[int, TetrisBlock] = dict()  # 현재 움직이고 있는 블록
+        self.queued_blocks: dict[int, deque[TetrisBlock]] = dict()  # 블록 대기열
         for key in key_list:
             self.queued_blocks[key] = deque()
             self.queue_block(key)
         self.score = 0  # 점수
+        self.down_gap_ns = 10 ** 6  # 블록이 내려가는 데 걸리는 시간
         self.end = False
     
     def update(self) -> bool:
@@ -38,24 +40,18 @@ class TetrisMap:
 
         # 시간이 된 블록 아래로 이동
         for key, block in self.moving_blocks.copy().items():
-            if now - block.created_time < TetrisMap.down_gap_ns:
+            if now - block.created_time < self.down_gap_ns:
                 continue
             new_block = block.move((1, 0))
             if self.confirm_block(key, new_block):
                 self.moving_blocks[key] = new_block
             else:  # 다 내려왔을 경우
                 self.fix_block(key)
+                self.score += 100 * self.remove_line()
                 if not self.pop_block(key):
-                    return False
+                    self.end = True
 
-        # 완성된 줄 제거
-        for i in range(TetrisMap.height):
-            if all(self.map[i]):
-                self.map.pop(i)
-                self.map.insert(0, [0] * TetrisMap.width)
-                self.score += 100
-
-        return True
+        return not self.end
     
     def get_map(self) -> list[list[int]]:
         """
@@ -68,17 +64,32 @@ class TetrisMap:
                 result[x][y] = key
         return result
 
+    def remove_line(self) -> int:
+        """
+        완성된 줄을 제거한다.
+        :return: 제거된 줄의 개수이다.
+        """
+        removed = 0
+        for i in range(TetrisMap.height):
+            if all(self.map[i]):
+                self.map.pop(i)
+                self.map.insert(0, [0] * TetrisMap.width)
+                removed += 1
+        return removed
+
     def queue_block(self, key: int) -> None:
         """
         대기열에 블록을 7개 추가한다.
-        :param key: 플레이어를 구분자
+        :param key: 플레이어 구분자
         """
-        pass
+        bag = list(range(1, 8))
+        shuffle(bag)
+        self.queued_blocks[key].extend(map(lambda i: TetrisBlock((0, 0), i), bag))
 
     def pop_block(self, key: int) -> bool:
         """
         대기열에 있는 블록을 판 위로 하나 가져온다.
-        :param key: 플레이어를 구분자
+        :param key: 플레이어 구분자
         :return: 블록을 가져왔으면 True, 블록이 꽉 차 놓을 수 없으면 False를 반환한다.
         """
         pass
@@ -86,7 +97,7 @@ class TetrisMap:
     def fix_block(self, key: int) -> None:
         """
         블록을 현재 위치에 고정한다.
-        :param key: 플레이어를 구분자
+        :param key: 플레이어 구분자
         """
         block = self.moving_blocks[key]
         for x, y in block.get_position():
@@ -95,25 +106,39 @@ class TetrisMap:
     def rotate_block(self, key: int, clockwise: bool) -> bool:
         """
         블록을 회전한다.
-        :param key: 플레이어를 구분자
+        :param key: 플레이어 구분자
         :param clockwise: 시계 방향이면 True, 반대 방향이면 False
         :return: 블록 회전에 성공하면 True, 그렇지 않으면 False를 반환한다.
         """
-        pass
-    
-    def move_block(self, key: int, mov: Point) -> bool:
+        new_block = self.moving_blocks[key].rotate(clockwise)
+        if self.confirm_block(key, new_block):
+            self.moving_blocks[key] = new_block
+            return True
+        for mov in zip((1, 1, 1, 0, 0, -1, -1, -1), (-1, 0, 1, -1, 1, -1, 0, 1)):
+            mov_block = new_block.move(mov)
+            if self.confirm_block(key, mov_block):
+                self.moving_blocks[key] = mov_block
+                return True
+        return False
+
+    def move_block(self, key: int, mov: int) -> bool:
         """
         블록을 움직인다.
-        :param key: 플레이어를 구분자
-        :param mov: 블록을 움직이는 정도를 표현하는 벡터이다.
+        :param key: 플레이어 구분자
+        :param mov: 블록을 움직이는 정도를 표현하는 수이다. 0: 오른쪽, 1: 아래, 2: 왼쪽, 3: 위
         :return: 블록 이동에 성공하면 True, 그렇지 않으면 False,를 반환한다.
         """
-        pass
+        rad = mov * pi / 2
+        new_block = self.moving_blocks[key].move((round(cos(rad)), round(sin(rad))))
+        if self.confirm_block(key, new_block):
+            self.moving_blocks[key] = new_block
+            return True
+        return False
 
     def superdown_block(self, key: int) -> bool:
         """
         블록을 최대한 아래로 내리고 고정한다.
-        :param key: 플레이어를 구분자
+        :param key: 플레이어 구분자
         :return: 최대한 아래로 내릴 수 있으면 True, 다른 블록에 의해 막혀 있으면 False를 반환한다.
         """
         pass
@@ -121,7 +146,7 @@ class TetrisMap:
     def confirm_block(self, key: int, block: 'TetrisBlock') -> bool:
         """
         현재 게임판 상태에서 주어진 블록이 위치할 수 있는지를 확인한다.
-        :param key: 플레이어를 구분자
+        :param key: 플레이어 구분자
         :param block: TetrisBlock 객체
         :return: 블록을 놓을 수 있으면 True, 그렇지 않으면 False를 반환한다.
         """
@@ -144,45 +169,38 @@ class TetrisBlock:
     """
     general_form: Final[list[Matrix]] = [
         [
-            [0, 1, 0, 0],
-            [0, 1, 0, 0],
-            [0, 1, 0, 0],
-            [0, 1, 0, 0],
+            [1, 1],
+            [1, 1],
+        ],
+        [
+            [0, 1, 1],
+            [1, 1, 0],
+            [0, 0, 0],
+        ],
+        [
+            [1, 1, 0],
+            [0, 1, 1],
+            [0, 0, 0],
+        ],
+        [
+            [1, 0, 0],
+            [1, 1, 1],
+            [0, 0, 0],
+        ],
+        [
+            [0, 0, 1],
+            [1, 1, 1],
+            [0, 0, 0],
+        ],
+        [
+            [0, 1, 0],
+            [1, 1, 1],
+            [0, 0, 0],
         ],
         [
             [0, 0, 0, 0],
-            [0, 1, 1, 0],
-            [0, 1, 1, 0],
+            [1, 1, 1, 1],
             [0, 0, 0, 0],
-        ],
-        [
-            [0, 0, 0, 0],
-            [0, 1, 1, 0],
-            [1, 1, 0, 0],
-            [0, 0, 0, 0],
-        ],
-        [
-            [0, 0, 0, 0],
-            [0, 1, 1, 0],
-            [0, 0, 1, 1],
-            [0, 0, 0, 0],
-        ],
-        [
-            [0, 0, 0, 0],
-            [1, 1, 1, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 0],
-        ],
-        [
-            [0, 0, 0, 0],
-            [0, 1, 1, 1],
-            [0, 1, 0, 0],
-            [0, 0, 0, 0],
-        ],
-        [
-            [0, 0, 0, 0],
-            [1, 1, 1, 0],
-            [0, 1, 0, 0],
             [0, 0, 0, 0],
         ],
     ]
@@ -203,8 +221,8 @@ class TetrisBlock:
         :return: 튜플로 표현된 점이 담긴 길이 4의 리스트
         """
         result = []
-        for i in range(4):
-            for j in range(4):
+        for i in range(len(self.form)):
+            for j in range(len(self.form[i])):
                 if self.form[i][j]:
                     result.append((self.pos[0] + i, self.pos[1] + j))
         return result
@@ -215,13 +233,13 @@ class TetrisBlock:
         :param clockwise: 시계 방향이면 True, 아니면 False
         :return: 새로운 블록 객체
         """
-        new_form = [[0] * 4 for _ in range(4)]
-        for i in range(4):
-            for j in range(4):
+        new_form = [[0] * len(self.form[i]) for i in range(len(self.form))]
+        for i in range(len(self.form)):
+            for j in range(len(self.form[i])):
                 if clockwise:
-                    new_form[i][j] = self.form[3 - j][i]
+                    new_form[i][j] = self.form[- 1 - j][i]
                 else:
-                    new_form[i][j] = self.form[j][3 - i]
+                    new_form[i][j] = self.form[j][- 1 - i]
         return TetrisBlock(self.pos, self.color, new_form)
 
     def move(self, amount: Point) -> 'TetrisBlock':
