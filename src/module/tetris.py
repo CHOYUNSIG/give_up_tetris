@@ -60,7 +60,7 @@ class TetrisMap:
         result = deepcopy(self.map)
         for key, block in self.moving_blocks.items():
             for x, y in block.get_position():
-                result[x][y] = key
+                result[x][y] = block.color
         return result
 
     def remove_line(self) -> int:
