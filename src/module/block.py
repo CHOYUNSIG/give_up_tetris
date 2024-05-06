@@ -4,9 +4,7 @@ from typing import Final
 from random import randrange, shuffle
 from math import cos, sin, pi
 from collections import deque
-
-Point = tuple[int, int]
-Matrix = list[list[int]]
+from custom_type import *
 
 
 class TetrisMap:
@@ -16,18 +14,21 @@ class TetrisMap:
     height: Final[int] = 30
     spawn_height: Final[int] = 6
     width: Final[int] = 10
+    min_queue_size: Final[int] = 3
 
     def __init__(self, key_list: list[int]):
-        self.map = [[0] * TetrisMap.width for _ in range(TetrisMap.height)]  # 게임판
-        self.moving_blocks: dict[int, TetrisBlock] = dict()  # 현재 움직이고 있는 블록
+        self.map = [[0] * TetrisMap.width for _ in range(TetrisMap.height)]  # 게임판, 이 게임판은 항상 무결함이 보장되어야 한다.
+        self.moving_blocks: dict[int, TetrisBlock or None] = dict()  # 현재 움직이고 있는 블록, 이 블록은 항상 무결함이 보장되어야 한다.
         self.queued_blocks: dict[int, deque[TetrisBlock]] = dict()  # 블록 대기열
         for key in key_list:
+            self.moving_blocks[key] = None
             self.queued_blocks[key] = deque()
             self.queue_block(key)
+            self.pop_block(key)
         self.score = 0  # 점수
         self.down_gap_ns = 10 ** 6  # 블록이 내려가는 데 걸리는 시간
         self.end = False
-    
+
     def update(self) -> bool:
         """
         게임판의 상태를 변경한다. 매 프레임마다 호출되어야 하는 함수이다.
@@ -35,24 +36,22 @@ class TetrisMap:
         """
         if self.end:
             return False
-
         now = perf_counter_ns()
-
         # 시간이 된 블록 아래로 이동
         for key, block in self.moving_blocks.copy().items():
             if now - block.created_time < self.down_gap_ns:
                 continue
             new_block = block.move((1, 0))
-            if self.confirm_block(key, new_block):
+            if self.confirm_block(key, new_block) == 0:
                 self.moving_blocks[key] = new_block
             else:  # 다 내려왔을 경우
                 self.fix_block(key)
                 self.score += 100 * self.remove_line()
                 if not self.pop_block(key):
                     self.end = True
+                    return False
+        return True
 
-        return not self.end
-    
     def get_map(self) -> list[list[int]]:
         """
         현재 게임판 상태를 반환한다.
@@ -92,16 +91,33 @@ class TetrisMap:
         :param key: 플레이어 구분자
         :return: 블록을 가져왔으면 True, 블록이 꽉 차 놓을 수 없으면 False를 반환한다.
         """
-        pass
+        if self.moving_blocks[key] is not None:
+            return False
+        block = self.queued_blocks[key].popleft()
+        if len(self.queued_blocks[key]) < TetrisMap.min_queue_size:
+            self.queue_block(key)
+        spot = list(range(TetrisMap.width))
+        shuffle(spot)
+        for s in spot:
+            block.set_position((TetrisMap.spawn_height, s))
+            if self.confirm_block(key, block) == 0:
+                self.moving_blocks[key] = block
+                return True
+        return False
 
-    def fix_block(self, key: int) -> None:
+    def fix_block(self, key: int) -> bool:
         """
         블록을 현재 위치에 고정한다.
         :param key: 플레이어 구분자
+        :return: 고정에 성공하면 True, 그렇지 않으면 False를 반환한다.
         """
+        if self.moving_blocks[key] is None:
+            return False
         block = self.moving_blocks[key]
         for x, y in block.get_position():
             self.map[x][y] = block.color
+        self.moving_blocks[key] = None
+        return True
 
     def rotate_block(self, key: int, clockwise: bool) -> bool:
         """
@@ -110,13 +126,15 @@ class TetrisMap:
         :param clockwise: 시계 방향이면 True, 반대 방향이면 False
         :return: 블록 회전에 성공하면 True, 그렇지 않으면 False를 반환한다.
         """
+        if self.moving_blocks[key] is None:
+            return False
         new_block = self.moving_blocks[key].rotate(clockwise)
-        if self.confirm_block(key, new_block):
+        if self.confirm_block(key, new_block) == 0:
             self.moving_blocks[key] = new_block
             return True
         for mov in zip((1, 1, 1, 0, 0, -1, -1, -1), (-1, 0, 1, -1, 1, -1, 0, 1)):
             mov_block = new_block.move(mov)
-            if self.confirm_block(key, mov_block):
+            if self.confirm_block(key, mov_block) == 0:
                 self.moving_blocks[key] = mov_block
                 return True
         return False
@@ -128,39 +146,49 @@ class TetrisMap:
         :param mov: 블록을 움직이는 정도를 표현하는 수이다. 0: 오른쪽, 1: 아래, 2: 왼쪽, 3: 위
         :return: 블록 이동에 성공하면 True, 그렇지 않으면 False,를 반환한다.
         """
+        if self.moving_blocks[key] is None:
+            return False
         rad = mov * pi / 2
         new_block = self.moving_blocks[key].move((round(cos(rad)), round(sin(rad))))
-        if self.confirm_block(key, new_block):
+        if self.confirm_block(key, new_block) == 0:
             self.moving_blocks[key] = new_block
             return True
         return False
 
     def superdown_block(self, key: int) -> bool:
         """
-        블록을 최대한 아래로 내리고 고정한다.
+        블록을 최대한 아래로 내린다.
         :param key: 플레이어 구분자
         :return: 최대한 아래로 내릴 수 있으면 True, 다른 블록에 의해 막혀 있으면 False를 반환한다.
         """
-        pass
+        if self.moving_blocks[key] is None:
+            return False
+        pre_block = self.moving_blocks[key]
+        new_block = pre_block.move((1, 0))
+        confirm = self.confirm_block(key, new_block)
+        while confirm == 0:
+            pre_block = new_block
+            new_block = new_block.move((1, 0))
+            confirm = self.confirm_block(key, new_block)
+        if confirm == 1 or confirm == 3:
+            self.moving_blocks[key] = pre_block
+            return True
+        return False
 
-    def confirm_block(self, key: int, block: 'TetrisBlock') -> bool:
+    def confirm_block(self, key: int, block: 'TetrisBlock') -> int:
         """
         현재 게임판 상태에서 주어진 블록이 위치할 수 있는지를 확인한다.
         :param key: 플레이어 구분자
         :param block: TetrisBlock 객체
-        :return: 블록을 놓을 수 있으면 True, 그렇지 않으면 False를 반환한다.
+        :return: 이상이 없으면 0, 맵 이탈은 1, 다른 플레이어의 블록과 겹치면 2, 이미 놓인 블록과 겹치면 3을 반환한다.
         """
-        if not all(
-            map(
-                lambda p: 0 <= p[0] < TetrisMap.height and 0 <= p[1] < TetrisMap.width and not self.map[p[0]][p[1]],
-                block.get_position()
-            )
-        ):
-            return False
-        for another_key, another_block in self.moving_blocks.items():
-            if another_key != key and another_block.collide(block):
-                return False
-        return True
+        if not all(map(lambda p: 0 <= p[0] < TetrisMap.height and 0 <= p[1] < TetrisMap.width, block.get_position())):
+            return 1
+        if any(map(lambda d: d[0] != key and block.collide(d[1]), self.moving_blocks.items())):
+            return 2
+        if any(map(lambda p: self.map[p[0]][p[1]] != 0, block.get_position())):
+            return 3
+        return 0
 
 
 class TetrisBlock:
@@ -226,6 +254,13 @@ class TetrisBlock:
                 if self.form[i][j]:
                     result.append((self.pos[0] + i, self.pos[1] + j))
         return result
+
+    def set_position(self, pos: Point) -> None:
+        """
+        블록의 위치를 설정한다.
+        :param pos: 위치
+        """
+        self.pos = pos
 
     def rotate(self, clockwise: bool) -> 'TetrisBlock':
         """
