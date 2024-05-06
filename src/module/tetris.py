@@ -4,7 +4,7 @@ from typing import Final
 from random import randrange, shuffle
 from math import cos, sin, pi
 from collections import deque
-from custom_type import *
+from src.module.custom_type import *
 
 
 class TetrisMap:
