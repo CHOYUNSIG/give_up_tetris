@@ -26,10 +26,21 @@ class Button(pygame.sprite.Sprite, metaclass=ABCMeta):
         :param screen: 화면 객체
         """
         for button in Button.buttons:
-            button.draw(screen)
+            if button.drawable:
+                button.draw(screen)
+
+    @staticmethod
+    def spread_size(size: Point) -> None:
+        """
+        모든 버튼에 변경된 화면 사이즈를 전파한다.
+        :param size: 변경된 화면 사이즈
+        """
+        for button in Button.buttons:
+            button.size(size)
 
     def __init__(self, point: Point, size: Point, *groups: pygame.sprite.Group):
-        self.rect: pygame.rect.Rect = pygame.rect.Rect(*point, *size)
+        self.rect = pygame.rect.Rect(*point, *size)
+        self.drawable = False
         Button.buttons.add(self)
         super().__init__(*groups)
 
@@ -38,16 +49,24 @@ class Button(pygame.sprite.Sprite, metaclass=ABCMeta):
         pygame.sprite.Sprite.kill(self)
 
     @abstractmethod
-    def click(self):
+    def click(self) -> None:
         """
         클릭되었을 때의 행동을 정의하여야 한다.
         """
         pass
 
     @abstractmethod
-    def draw(self, screen: pygame.Surface):
+    def draw(self, screen: pygame.Surface) -> None:
         """
         버튼을 그리는 방법을 정의하여야 한다.
         :param screen: 화면 객체
+        """
+        pass
+
+    @abstractmethod
+    def size(self, size: Point) -> None:
+        """
+        화면 사이즈 변경시 행동을 정의하여야 한다.
+        :param size: 변경된 화면 사이즈
         """
         pass

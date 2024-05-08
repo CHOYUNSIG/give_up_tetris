@@ -1,4 +1,4 @@
-from time import perf_counter_ns
+from time import monotonic_ns
 from copy import deepcopy
 from typing import Final
 from random import randrange, shuffle
@@ -26,8 +26,19 @@ class TetrisMap:
             self.queue_block(key)
             self.pop_block(key)
         self.score = 0  # 점수
-        self.down_gap_ns = 10 ** 6  # 블록이 내려가는 데 걸리는 시간
+        self.downgap_ns = 1 * 10 ** 9  # 블록이 내려가는 데 걸리는 시간
         self.end = False
+
+    def __repr__(self) -> str:
+        result = super().__repr__() + '\n'
+        for row in self.get_map():
+            for i in row:
+                if i:
+                    result += '■'
+                else:
+                    result += ' '
+            result += '\n'
+        return result
 
     def update(self) -> bool:
         """
@@ -36,20 +47,23 @@ class TetrisMap:
         """
         if self.end:
             return False
-        now = perf_counter_ns()
+        now = monotonic_ns()
         # 시간이 된 블록 아래로 이동
         for key, block in self.moving_blocks.copy().items():
-            if now - block.created_time < self.down_gap_ns:
+            if now - block.created_time < self.downgap_ns:
                 continue
-            new_block = block.move((1, 0))
-            if self.confirm_block(key, new_block) == 0:
+            new_block = block.move((1, 0)).copy()
+            confirm = self.confirm_block(key, new_block)
+            if confirm == 0:  # 내려야 하는 경우
                 self.moving_blocks[key] = new_block
-            else:  # 다 내려왔을 경우
+            elif confirm == 1 or confirm == 3:  # 다 내려왔을 경우
                 self.fix_block(key)
                 self.score += 100 * self.remove_line()
                 if not self.pop_block(key):
                     self.end = True
                     return False
+            else:  # 다른 플레이어의 블록에 막힌 경우
+                self.moving_blocks[key] = block.move((0, 0))
         return True
 
     def get_map(self) -> list[list[int]]:
@@ -59,9 +73,24 @@ class TetrisMap:
         """
         result = deepcopy(self.map)
         for key, block in self.moving_blocks.items():
+            if block is None:
+                continue
             for x, y in block.get_position():
                 result[x][y] = block.color
         return result
+
+    def get_score(self) -> int:
+        """
+        현재 점수를 반환한다.
+        """
+        return self.score
+
+    def set_downgap(self, ns: int) -> None:
+        """
+        블록이 내려오는 시간을 조절한다.
+        :param ns: 나노초 단위의 시간
+        """
+        self.downgap_ns = ns
 
     def remove_line(self) -> int:
         """
@@ -99,9 +128,9 @@ class TetrisMap:
         spot = list(range(TetrisMap.width))
         shuffle(spot)
         for s in spot:
-            block.set_position((TetrisMap.spawn_height, s))
-            if self.confirm_block(key, block) == 0:
-                self.moving_blocks[key] = block
+            new_block = block.move((TetrisMap.spawn_height, s))
+            if self.confirm_block(key, new_block) == 0:
+                self.moving_blocks[key] = new_block
                 return True
         return False
 
@@ -149,7 +178,9 @@ class TetrisMap:
         if self.moving_blocks[key] is None:
             return False
         rad = mov * pi / 2
-        new_block = self.moving_blocks[key].move((round(cos(rad)), round(sin(rad))))
+        new_block = self.moving_blocks[key].move((round(sin(rad)), round(cos(rad))))
+        if mov == 1:
+            new_block = new_block.copy()
         if self.confirm_block(key, new_block) == 0:
             self.moving_blocks[key] = new_block
             return True
@@ -157,7 +188,7 @@ class TetrisMap:
 
     def superdown_block(self, key: int) -> bool:
         """
-        블록을 최대한 아래로 내린다.
+        블록을 최대한 아래로 내리고 고정한다.
         :param key: 플레이어 구분자
         :return: 최대한 아래로 내릴 수 있으면 True, 다른 블록에 의해 막혀 있으면 False를 반환한다.
         """
@@ -233,15 +264,17 @@ class TetrisBlock:
         ],
     ]
 
-    def __init__(self, pos: Point, color: int or None = None, form: Matrix or None = None):
-        self.created_time = perf_counter_ns()
-        self.color = color
-        self.form = deepcopy(form)
-        if self.color is None:
-            self.color = randrange(7) + 1
-        if self.form is None:
-            self.form = deepcopy(TetrisBlock.general_form[self.color - 1])
-        self.pos = pos
+    def __init__(self, pos: Point, color: int or None = None, form: Matrix or None = None, created_time: int or None = None):
+        if color is None:
+            color = randrange(7) + 1
+        if form is None:
+            form = TetrisBlock.general_form[color - 1]
+        if created_time is None:
+            created_time = monotonic_ns()
+        self.pos: Final[Point] = pos
+        self.created_time: Final[int] = created_time
+        self.color: Final[int] = color
+        self.form: Final[Matrix] = deepcopy(form)
 
     def get_position(self) -> list[Point]:
         """
@@ -254,13 +287,6 @@ class TetrisBlock:
                 if self.form[i][j]:
                     result.append((self.pos[0] + i, self.pos[1] + j))
         return result
-
-    def set_position(self, pos: Point) -> None:
-        """
-        블록의 위치를 설정한다.
-        :param pos: 위치
-        """
-        self.pos = pos
 
     def rotate(self, clockwise: bool) -> 'TetrisBlock':
         """
@@ -275,7 +301,7 @@ class TetrisBlock:
                     new_form[i][j] = self.form[- 1 - j][i]
                 else:
                     new_form[i][j] = self.form[j][- 1 - i]
-        return TetrisBlock(self.pos, self.color, new_form)
+        return TetrisBlock(self.pos, self.color, new_form, self.created_time)
 
     def move(self, amount: Point) -> 'TetrisBlock':
         """
@@ -283,7 +309,14 @@ class TetrisBlock:
         :param amount: 블록을 움직일 벡터
         :return: 새로운 블록 객체
         """
-        return TetrisBlock((self.pos[0] + amount[0], self.pos[1] + amount[1]), self.color, self.form)
+        return TetrisBlock((self.pos[0] + amount[0], self.pos[1] + amount[1]), self.color, self.form, self.created_time)
+
+    def copy(self) -> 'TetrisBlock':
+        """
+        블록을 복사한다.
+        :return: 새로운 블록 객체
+        """
+        return TetrisBlock(self.pos, self.color, self.form)
 
     def collide(self, other: 'TetrisBlock') -> bool:
         """
@@ -293,3 +326,46 @@ class TetrisBlock:
         """
         point = self.get_position()
         return any(map(lambda p: p in point, other.get_position()))
+
+
+if __name__ == "__main__":
+    player = [0]
+    tetris = TetrisMap(player)
+    w = 20
+
+    import pygame
+    pygame.init()
+    screen = pygame.display.set_mode((600, 600))
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont(None, 50)
+    done = False
+
+    while not done:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                done = True
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_LEFT:
+                    tetris.move_block(player[0], 2)
+                if event.key == pygame.K_RIGHT:
+                    tetris.move_block(player[0], 0)
+                if event.key == pygame.K_UP:
+                    tetris.rotate_block(player[0], True)
+                if event.key == pygame.K_DOWN:
+                    tetris.move_block(player[0], 1)
+                if event.key == pygame.K_SPACE:
+                    tetris.superdown_block(player[0])
+
+        tetris.update()
+        m = tetris.get_map()
+        tetris.set_downgap(round(1000 / (1000 + tetris.get_score()) * 10 ** 9))
+
+        screen.fill(pygame.Color(0, 0, 0))
+        for i in range(len(m)):
+            for j in range(len(m[i])):
+                if m[i][j]:
+                    pygame.draw.rect(screen, (255, 255, 255), (j * w, i * w, w, w))
+        screen.blit(font.render(str(tetris.get_score()), True, (255, 255, 255)), (300, 300))
+        pygame.display.update()
+
+        clock.tick(60)
