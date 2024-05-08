@@ -50,7 +50,7 @@ class TetrisMap:
         now = monotonic_ns()
         # 시간이 된 블록 아래로 이동
         for key, block in self.moving_blocks.copy().items():
-            if now - block.created_time < self.downgap_ns:
+            if block is None or now - block.created_time < self.downgap_ns:
                 continue
             new_block = block.move((1, 0)).copy()
             confirm = self.confirm_block(key, new_block)
@@ -66,7 +66,7 @@ class TetrisMap:
                 self.moving_blocks[key] = block.move((0, 0))
         return True
 
-    def get_map(self) -> list[list[int]]:
+    def get_map(self) -> Matrix:
         """
         현재 게임판 상태를 반환한다.
         :return: int 자료형의 2차원 리스트
@@ -79,9 +79,20 @@ class TetrisMap:
                 result[x][y] = block.color
         return result
 
+    def get_player_position(self, key: int) -> list[Point] or None:
+        """
+        현재 판에서 플레이어가 조종 중인 블록의 위치를 반환한다.
+        :param key: 플레이어 식별자 
+        :return: 플레이어가 조종 중인 블록의 좌표 리스트
+        """
+        if self.moving_blocks[key] is not None:
+            return None
+        return self.moving_blocks[key].get_position()
+
     def get_score(self) -> int:
         """
         현재 점수를 반환한다.
+        :return: 현재 점수
         """
         return self.score
 
@@ -190,19 +201,24 @@ class TetrisMap:
         """
         블록을 최대한 아래로 내리고 고정한다.
         :param key: 플레이어 구분자
-        :return: 최대한 아래로 내릴 수 있으면 True, 다른 블록에 의해 막혀 있으면 False를 반환한다.
+        :return: 최대한 아래로 내릴 수 있으면 True, 다른 플레이어의 블록에 의해 막혀 있으면 False를 반환한다.
         """
         if self.moving_blocks[key] is None:
             return False
+        moved = False
         pre_block = self.moving_blocks[key]
         new_block = pre_block.move((1, 0))
         confirm = self.confirm_block(key, new_block)
         while confirm == 0:
+            moved = True
             pre_block = new_block
             new_block = new_block.move((1, 0))
             confirm = self.confirm_block(key, new_block)
         if confirm == 1 or confirm == 3:
-            self.moving_blocks[key] = pre_block
+            if moved:
+                self.moving_blocks[key] = pre_block.copy()
+            else:
+                self.moving_blocks[key] = pre_block
             return True
         return False
 
@@ -213,9 +229,11 @@ class TetrisMap:
         :param block: TetrisBlock 객체
         :return: 이상이 없으면 0, 맵 이탈은 1, 다른 플레이어의 블록과 겹치면 2, 이미 놓인 블록과 겹치면 3을 반환한다.
         """
+        if block is None:
+            return 0
         if not all(map(lambda p: 0 <= p[0] < TetrisMap.height and 0 <= p[1] < TetrisMap.width, block.get_position())):
             return 1
-        if any(map(lambda d: d[0] != key and block.collide(d[1]), self.moving_blocks.items())):
+        if any(map(lambda d: d[0] != key and d[1] is not None and block.collide(d[1]), self.moving_blocks.items())):
             return 2
         if any(map(lambda p: self.map[p[0]][p[1]] != 0, block.get_position())):
             return 3
@@ -329,15 +347,30 @@ class TetrisBlock:
 
 
 if __name__ == "__main__":
-    player = [0]
-    tetris = TetrisMap(player)
-    w = 20
-
     import pygame
     pygame.init()
+
+    w = 20
     screen = pygame.display.set_mode((600, 600))
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 50)
+
+    player = {
+        0: (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_SPACE),
+        # 1: (pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s, pygame.K_LSHIFT),
+    }
+
+    block_color = {
+        1: pygame.Color(255, 255, 0),
+        2: pygame.Color(0, 255, 0),
+        3: pygame.Color(255, 0, 0),
+        4: pygame.Color(0, 0, 255),
+        5: pygame.Color(255, 127, 0),
+        6: pygame.Color(255, 0, 255),
+        7: pygame.Color(0, 255, 255),
+    }
+
+    tetris = TetrisMap(list(player.keys()))
     done = False
 
     while not done:
@@ -345,16 +378,17 @@ if __name__ == "__main__":
             if event.type == pygame.QUIT:
                 done = True
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT:
-                    tetris.move_block(player[0], 2)
-                if event.key == pygame.K_RIGHT:
-                    tetris.move_block(player[0], 0)
-                if event.key == pygame.K_UP:
-                    tetris.rotate_block(player[0], True)
-                if event.key == pygame.K_DOWN:
-                    tetris.move_block(player[0], 1)
-                if event.key == pygame.K_SPACE:
-                    tetris.superdown_block(player[0])
+                for p, key in player.items():
+                    if event.key == key[0]:
+                        tetris.move_block(p, 2)
+                    if event.key == key[1]:
+                        tetris.move_block(p, 0)
+                    if event.key == key[2]:
+                        tetris.rotate_block(p, True)
+                    if event.key == key[3]:
+                        tetris.move_block(p, 1)
+                    if event.key == key[4]:
+                        tetris.superdown_block(p)
 
         tetris.update()
         m = tetris.get_map()
@@ -364,7 +398,7 @@ if __name__ == "__main__":
         for i in range(len(m)):
             for j in range(len(m[i])):
                 if m[i][j]:
-                    pygame.draw.rect(screen, (255, 255, 255), (j * w, i * w, w, w))
+                    pygame.draw.rect(screen, block_color[m[i][j]], (j * w, i * w, w, w))
         screen.blit(font.render(str(tetris.get_score()), True, (255, 255, 255)), (300, 300))
         pygame.display.update()
 
