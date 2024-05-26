@@ -8,23 +8,17 @@ from src.module.custom_type import *
 
 
 class Tetris:
-    """
-    테트리스 모듈
-    """
-
     def __init__(self, *player_list: str):
+        """
+        테트리스 API 모듈
+        :param player_list: 플레이어 목록
+        """
         self.__players = { player: key for key, player in enumerate(player_list) }
         self.__tetris = TetrisMap(list(self.__players.values()), 3)
         self.__downgap_ns = 1 * 10 ** 9
         self.__score = 0
         self.__started = False
         self.__ended = False
-
-    def start(self) -> None:
-        """
-        게임을 시작한다.
-        """
-        self.__started = True
 
     def update(self) -> None:
         """
@@ -46,11 +40,29 @@ class Tetris:
         # 내려가는 시간 조절
         self.__downgap_ns = round(1000 * 10 ** 9 / (1000 + self.__score))
 
+    def start(self) -> None:
+        """
+        게임을 시작한다.
+        """
+        self.__started = True
+
     def end(self) -> None:
         """
         게임을 끝낸다.
         """
         self.__ended = True
+
+    def get_state(self) -> int:
+        """
+        게임의 진행 상태를 반환한다.
+        :return: 게임 시작 전이면 0, 진행 중이면 1, 끝났으면 2를 반환한다.
+        """
+        if not self.__started:
+            return 0
+        elif not self.__ended:
+            return 1
+        else:
+            return 2
 
     def get_map(self) -> Matrix:
         """
@@ -135,18 +147,20 @@ class Tetris:
 
 
 class TetrisMap:
-    """
-    테트리스 게임 판
-    """
     height: Final[int] = 30
     spawn_height: Final[int] = 6
     width: Final[int] = 10
 
     def __init__(self, key_list: list[int], min_queue_size: int):
-        self.min_queue_size = min_queue_size
-        self.map = [[0] * TetrisMap.width for _ in range(TetrisMap.height)]  # 게임판
-        self.moving_blocks: dict[int, TetrisBlock | None] = { key: None for key in key_list }  # 현재 움직이고 있는 블록
-        self.queued_blocks: dict[int, deque[TetrisBlock]] = { key: deque() for key in key_list }  # 블록 대기열
+        """
+        테트리스 게임 판
+        :param key_list: 풀레이어 구분자 리스트
+        :param min_queue_size: 블록 대기 큐의 최소 사이즈
+        """
+        self.min_queue_size: Final[int] = min_queue_size
+        self.__map: Matrix = [[0] * TetrisMap.width for _ in range(TetrisMap.height)]  # 게임판
+        self.__moving_blocks: dict[int, TetrisBlock | None] = { key: None for key in key_list }  # 현재 움직이고 있는 블록
+        self.__queued_blocks: dict[int, deque[TetrisBlock]] = { key: deque() for key in key_list }  # 블록 대기열
         for key in key_list:
             self.fix_remove_pop(key)
 
@@ -155,8 +169,8 @@ class TetrisMap:
         현재 게임판 상태를 반환한다.
         :return: int 자료형의 2차원 리스트이다.
         """
-        result = deepcopy(self.map)
-        for key, block in self.moving_blocks.items():
+        result = deepcopy(self.__map)
+        for key, block in self.__moving_blocks.items():
             if block is None:
                 continue
             for x, y in block.get_position():
@@ -166,12 +180,10 @@ class TetrisMap:
     def get_position(self, key: int) -> list[Point]:
         """
         현재 판에서 플레이어가 조종 중인 블록의 위치를 반환한다.
-        :param key: 플레이어 식별자 
+        :param key: 플레이어 식별자
         :return: 플레이어가 조종 중인 블록의 좌표 리스트이다.
         """
-        if self.moving_blocks[key] is None:
-            raise
-        return self.moving_blocks[key].get_position()
+        return self.__moving_blocks[key].get_position()
 
     def get_hangtime(self, key: int) -> int:
         """
@@ -179,9 +191,7 @@ class TetrisMap:
         :param key: 플레이어 식별자
         :return: 나노초 단위의 체공 유지 시간이다.
         """
-        if self.moving_blocks[key] is None:
-            raise
-        return monotonic_ns() - self.moving_blocks[key].created_time
+        return monotonic_ns() - self.__moving_blocks[key].created_time
 
     def get_queue(self, key: int) -> list[Matrix]:
         """
@@ -189,7 +199,7 @@ class TetrisMap:
         :param key: 플레이어 식별자
         :return: 블록을 나타내는 행렬을 담은 리스트이다.
         """
-        return list(map(lambda b: deepcopy(b.form), self.queued_blocks[key]))
+        return list(map(lambda b: deepcopy(b.form), self.__queued_blocks[key]))
 
     def fix_remove_pop(self, key: int) -> int | None:
         """
@@ -197,26 +207,26 @@ class TetrisMap:
         :param key: 플레이어 구분자
         :return: 정상적으로 종료되면 사라진 줄의 개수를, 그렇지 않으면 None을 반환한다.
         """
-        if self.moving_blocks[key] is not None:
-            for x, y in self.moving_blocks[key].get_position():
-                self.map[x][y] = self.moving_blocks[key].color
+        if self.__moving_blocks[key] is not None:
+            for x, y in self.__moving_blocks[key].get_position():
+                self.__map[x][y] = self.__moving_blocks[key].color
         removed = 0
         for i in range(TetrisMap.height):
-            if all(self.map[i]):
-                self.map.pop(i)
-                self.map.insert(0, [0] * TetrisMap.width)
+            if all(self.__map[i]):
+                self.__map.pop(i)
+                self.__map.insert(0, [0] * TetrisMap.width)
                 removed += 1
-        while len(self.queued_blocks[key]) <= self.min_queue_size:
+        while len(self.__queued_blocks[key]) <= self.min_queue_size:
             bag = list(range(1, 8))
             shuffle(bag)
-            self.queued_blocks[key].extend(map(lambda i: TetrisBlock((0, 0), i), bag))
-        block = self.queued_blocks[key].popleft()
+            self.__queued_blocks[key].extend(map(lambda i: TetrisBlock((0, 0), i), bag))
+        block = self.__queued_blocks[key].popleft()
         spot = list(range(TetrisMap.width))
         shuffle(spot)
         for s in spot:
             new_block = block.move((TetrisMap.spawn_height, s))
-            if self.confirm_block(key, new_block) == 0:
-                self.moving_blocks[key] = new_block.copy()
+            if self.__confirm_block(key, new_block) == 0:
+                self.__moving_blocks[key] = new_block.copy()
                 return removed
         return None
 
@@ -227,16 +237,14 @@ class TetrisMap:
         :param clockwise: 시계 방향이면 True, 반대 방향이면 False
         :return: 블록 회전에 성공하면 True, 그렇지 않으면 False를 반환한다.
         """
-        if self.moving_blocks[key] is None:
-            raise
-        new_block = self.moving_blocks[key].rotate(clockwise)
-        if self.confirm_block(key, new_block) == 0:
-            self.moving_blocks[key] = new_block
+        new_block = self.__moving_blocks[key].rotate(clockwise)
+        if self.__confirm_block(key, new_block) == 0:
+            self.__moving_blocks[key] = new_block
             return True
         for mov in zip((1, 1, 1, 0, 0, -1, -1, -1), (-1, 0, 1, -1, 1, -1, 0, 1)):
             mov_block = new_block.move(mov)
-            if self.confirm_block(key, mov_block) == 0:
-                self.moving_blocks[key] = mov_block
+            if self.__confirm_block(key, mov_block) == 0:
+                self.__moving_blocks[key] = mov_block
                 return True
         return False
 
@@ -247,15 +255,13 @@ class TetrisMap:
         :param mov: 블록을 움직이는 정도를 표현하는 수이다. 0은 오른쪽, 1은 아래, 2는 왼쪽, 3은 위
         :return: 성공은 0, 맵 이탈에 의한 실패는 1, 다른 플레이어의 블록에 의한 실패는 2, 이미 놓은 블록에 의한 실패는 3을 반환한다.
         """
-        if self.moving_blocks[key] is None:
-            raise
         rad = mov * pi / 2
-        new_block = self.moving_blocks[key].move((round(sin(rad)), round(cos(rad))))
+        new_block = self.__moving_blocks[key].move((round(sin(rad)), round(cos(rad))))
         if mov == 1:
             new_block = new_block.copy()
-        confirm = self.confirm_block(key, new_block)
+        confirm = self.__confirm_block(key, new_block)
         if confirm == 0:
-            self.moving_blocks[key] = new_block
+            self.__moving_blocks[key] = new_block
         return confirm
 
     def superdown_block(self, key: int) -> int:
@@ -264,19 +270,17 @@ class TetrisMap:
         :param key: 플레이어 구분자
         :return: 맵 이탈에 의한 멈춤은 1, 다른 플레이어의 블록에 의한 멈춤은 2, 이미 놓은 블록에 의한 멈춤은 3을 반환한다.
         """
-        if self.moving_blocks[key] is None:
-            raise
-        pre_block = self.moving_blocks[key]
+        pre_block = self.__moving_blocks[key]
         new_block = pre_block.move((1, 0))
-        confirm = self.confirm_block(key, new_block)
+        confirm = self.__confirm_block(key, new_block)
         while confirm == 0:
             pre_block = new_block
             new_block = new_block.move((1, 0))
-            confirm = self.confirm_block(key, new_block)
-        self.moving_blocks[key] = pre_block.copy()
+            confirm = self.__confirm_block(key, new_block)
+        self.__moving_blocks[key] = pre_block.copy()
         return confirm
 
-    def confirm_block(self, key: int, block: 'TetrisBlock') -> int:
+    def __confirm_block(self, key: int, block: 'TetrisBlock') -> int:
         """
         현재 게임판 상태에서 주어진 블록이 위치할 수 있는지를 확인한다.
         :param key: 플레이어 구분자
@@ -285,18 +289,18 @@ class TetrisMap:
         """
         if not all(map(lambda p: 0 <= p[0] < TetrisMap.height and 0 <= p[1] < TetrisMap.width, block.get_position())):
             return 1
-        if any(map(lambda d: d[0] != key and d[1] is not None and block.collide(d[1]), self.moving_blocks.items())):
+        if any(map(lambda d: d[0] != key and d[1] is not None and block.collide(d[1]), self.__moving_blocks.items())):
             return 2
-        if any(map(lambda p: self.map[p[0]][p[1]] != 0, block.get_position())):
+        if any(map(lambda p: self.__map[p[0]][p[1]] != 0, block.get_position())):
             return 3
         return 0
 
 
 class TetrisBlock:
-    """
-    테트리스 블록
-    """
     general_form: Final[list[Matrix]] = [
+        [
+            [0],
+        ],
         [
             [1, 1],
             [1, 1],
@@ -334,12 +338,22 @@ class TetrisBlock:
         ],
     ]
 
-    def __init__(self, pos: Point, color: int or None = None, form: Matrix or None = None,
+    def __init__(self,
+                 pos: Point,
+                 color: int or None = None,
+                 form: Matrix or None = None,
                  created_time: int or None = None):
+        """
+        테트리스 블록
+        :param pos: 생성 위치
+        :param color: 색상 구분자
+        :param form: 블록 위상을 나타내는 행렬
+        :param created_time: 시스템 상의 생성 시간
+        """
         if color is None:
-            color = randrange(7) + 1
+            color = randrange(1, len(TetrisBlock.general_form))
         if form is None:
-            form = TetrisBlock.general_form[color - 1]
+            form = TetrisBlock.general_form[color]
         if created_time is None:
             created_time = monotonic_ns()
         self.pos: Final[Point] = pos
@@ -410,7 +424,8 @@ if __name__ == "__main__":
     font = pygame.font.SysFont(None, 50)
 
     player = {
-        "choyunsig": (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_SPACE, pygame.Color(255, 0, 0)),
+        "choyunsig": (
+        pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_SPACE, pygame.Color(255, 0, 0)),
         "kim": (pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s, pygame.K_LSHIFT, pygame.Color(0, 255, 0)),
     }
 
@@ -448,7 +463,8 @@ if __name__ == "__main__":
         tetris.update()
         m = tetris.get_map()
 
-        screen.fill(pygame.Color(0, 0, 0))
+        screen.fill(pygame.Color(50, 50, 50))
+        pygame.draw.rect(screen, (0, 0, 0), (0, 0, w * 10, w * 30))
         for p, color in player.items():
             for i, j in tetris.get_position(p):
                 pygame.draw.rect(screen, color[5], (j * w - 2, i * w - 2, w + 4, w + 4))
@@ -456,7 +472,9 @@ if __name__ == "__main__":
             for j in range(len(m[i])):
                 if m[i][j]:
                     pygame.draw.rect(screen, block_color[m[i][j]], (j * w, i * w, w, w))
-        screen.blit(font.render(str(tetris.get_score()), True, (255, 255, 255)), (300, 300))
+        screen.blit(font.render("Score: %d" % tetris.get_score(), True, (255, 255, 255)), (300, 300))
+        if tetris.get_state() == 2:
+            screen.blit(font.render("Game Over", True, (255, 255, 255)), (300, 350))
         pygame.display.update()
 
         clock.tick(60)
