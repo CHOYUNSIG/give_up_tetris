@@ -1,9 +1,9 @@
 import pygame
-from abc import *
-from src.module.custom_type import *
+from abc import ABC, abstractmethod
+from src.util.custom_type import Point, Matrix
 
 
-class Button(metaclass=ABCMeta):
+class Button(ABC):
     buttons: set['Button'] = set()
 
     @staticmethod
@@ -78,7 +78,7 @@ class Button(metaclass=ABCMeta):
         pass
 
 
-class TextButton(Button, metaclass=ABCMeta):
+class TextButton(Button, ABC):
     def __init__(self,
                  point: Point,
                  size: Point,
@@ -99,7 +99,7 @@ class TextButton(Button, metaclass=ABCMeta):
         self.color = color
 
 
-class EdgeButton(TextButton, metaclass=ABCMeta):
+class EdgeButton(TextButton, ABC):
     def __init__(self,
                  point: Point,
                  size: Point,
@@ -124,7 +124,7 @@ class EdgeButton(TextButton, metaclass=ABCMeta):
         screen.blit(self.font.render(self.text, True, self.color), self.rect)
 
 
-class ImageButton(Button, metaclass=ABCMeta):
+class ImageButton(Button, ABC):
     def __init__(self,
                  point: Point,
                  size: Point,

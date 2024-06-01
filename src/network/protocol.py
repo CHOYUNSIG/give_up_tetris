@@ -10,9 +10,6 @@ class TetrisMessageType(MessageType):
     """
     테트리스 메시지 정의
     """
-    introduce_req = auto()  # 소개 요청
-    introduce = auto()  # 소개
-
     chat = auto()  # 채팅 메시지
 
     game_start = auto()  # 게임 시작

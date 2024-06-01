@@ -1,10 +1,11 @@
-from time import monotonic_ns
-from copy import deepcopy
-from typing import Final
-from random import randrange, shuffle
-from math import cos, sin, pi
 from collections import deque
-from src.module.custom_type import *
+from copy import deepcopy
+from math import cos, sin, pi
+from random import randrange, shuffle
+from time import monotonic_ns
+from typing import Final
+
+from src.util.custom_type import *
 
 
 class Tetris:
@@ -78,6 +79,13 @@ class Tetris:
         """
         return self.__score
 
+    def get_queue(self) -> list[Matrix]:
+        """
+        현재 대기 큐 상태를 얻는다.
+        :return: 블록을 표현하는 행렬을 담은 리스트이다.
+        """
+        return self.__tetris.get_queue()
+
     def get_position(self, player: str) -> list[Point]:
         """
         현재 플레이어가 조종하고 있는 블록의 위치를 얻는다.
@@ -85,14 +93,6 @@ class Tetris:
         :return: 블록의 좌표를 담은 리스트이다.
         """
         return self.__tetris.get_position(self.__players[player])
-
-    def get_queue(self, player: str) -> list[Matrix]:
-        """
-        현재 플레이어의 대기 큐 상태를 얻는다.
-        :param player: 플레이어 이름
-        :return: 블록을 표현하는 행렬을 담은 리스트이다.
-        """
-        return self.__tetris.get_queue(self.__players[player])
 
     def move_left(self, player: str) -> None:
         """
@@ -160,7 +160,7 @@ class TetrisMap:
         self.min_queue_size: Final[int] = min_queue_size
         self.__map: Matrix = [[0] * TetrisMap.width for _ in range(TetrisMap.height)]  # 게임판
         self.__moving_blocks: dict[int, TetrisBlock | None] = { key: None for key in key_list }  # 현재 움직이고 있는 블록
-        self.__queued_blocks: dict[int, deque[TetrisBlock]] = { key: deque() for key in key_list }  # 블록 대기열
+        self.__queue: deque[TetrisBlock] = deque()  # 블록 대기열
         for key in key_list:
             self.fix_remove_pop(key)
 
@@ -193,13 +193,12 @@ class TetrisMap:
         """
         return monotonic_ns() - self.__moving_blocks[key].created_time
 
-    def get_queue(self, key: int) -> list[Matrix]:
+    def get_queue(self) -> list[Matrix]:
         """
-        플레이어의 블록 대기 큐에 있는 블록 현황을 반환한다.
-        :param key: 플레이어 식별자
+        블록 대기 큐에 있는 블록 현황을 반환한다.
         :return: 블록을 나타내는 행렬을 담은 리스트이다.
         """
-        return list(map(lambda b: deepcopy(b.form), self.__queued_blocks[key]))
+        return list(map(lambda b: deepcopy(b.form), self.__queue))
 
     def fix_remove_pop(self, key: int) -> int | None:
         """
@@ -216,11 +215,11 @@ class TetrisMap:
                 self.__map.pop(i)
                 self.__map.insert(0, [0] * TetrisMap.width)
                 removed += 1
-        while len(self.__queued_blocks[key]) <= self.min_queue_size:
+        while len(self.__queue) <= self.min_queue_size:
             bag = list(range(1, 8))
             shuffle(bag)
-            self.__queued_blocks[key].extend(map(lambda i: TetrisBlock((0, 0), i), bag))
-        block = self.__queued_blocks[key].popleft()
+            self.__queue.extend(map(lambda i: TetrisBlock((0, 0), i), bag))
+        block = self.__queue.popleft()
         spot = list(range(TetrisMap.width))
         shuffle(spot)
         for s in spot:

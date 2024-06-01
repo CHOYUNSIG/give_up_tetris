@@ -1,7 +1,8 @@
 import socket
 import struct
-from threading import Thread
+from threading import Thread, Lock
 import netifaces
+from time import sleep
 
 
 class ServerScanner:
@@ -40,14 +41,20 @@ class ServerScanner:
         """
         self.__scanning = False
         self.__server_list: list[tuple[str, int]] = []
+        self.__lock = Lock()
 
     def scan(self, port: int) -> None:
         """
         비동기적으로 스캔을 수행한다.
         """
-        if self.__scanning:
+        self.__lock.acquire()
+        scanning = self.__scanning
+        self.__lock.release()
+        if scanning:
             return
+        self.__lock.acquire()
         self.__scanning = True
+        self.__lock.release()
 
         def scanning() -> None:
             threads: list[ServerScanner.ServerScanThread] = []
@@ -57,8 +64,11 @@ class ServerScanner:
                     thread = self.ServerScanThread(ip, port)
                     threads.append(thread)
                     thread.start()
-            self.__server_list = list(filter(lambda x: x is not None, [thread.join() for thread in threads]))
+            server_list = list(filter(lambda x: x is not None, [thread.join() for thread in threads]))
+            self.__lock.acquire()
+            self.__server_list = server_list.copy()
             self.__scanning = False
+            self.__lock.release()
 
         Thread(target=scanning, daemon=True).start()
 
@@ -67,7 +77,11 @@ class ServerScanner:
         스캔된 서버 IP 주소 현황을 반환한다.
         :return: (IP 주소, 포트 번호) 튜플들이 담긴 튜플
         """
-        return self.__server_list
+        sleep(0)
+        self.__lock.acquire()
+        server_list = self.__server_list.copy()
+        self.__lock.release()
+        return server_list
 
 
 def get_iface_list() -> list[tuple[int, int]]:
@@ -93,10 +107,7 @@ def get_iface_list() -> list[tuple[int, int]]:
 
 
 if __name__ == "__main__":
-    from time import sleep
-
     scanner = ServerScanner()
     scanner.scan(int(input("enter the port number: ")))
     while True:
-        sleep(0.5)
         print(scanner.get_server_list())
