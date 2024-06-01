@@ -23,7 +23,7 @@ Message = tuple[MT, any]  # 메시지의 정의
 class PairSocket(ABC):
     def __init__(self, name: str):
         """
-        양방향 메시지 비동기 버퍼링 소켓
+        비동기 버퍼링, 스레드 안정성 소켓
         """
         self._name: Final[str] = name
         self._opposite_name: str | None = None
@@ -45,7 +45,10 @@ class PairSocket(ABC):
                     msgtype, body = msg
                     self._lock.acquire()
                     if msgtype in self._handler_map:
-                        self._handler_map[msgtype](body)
+                        handler = self._handler_map[msgtype]
+                        self._lock.release()
+                        handler(msg)
+                        self._lock.acquire()
                     elif msgtype == -1:  # 소개
                         self._opposite_name = body
                     else:

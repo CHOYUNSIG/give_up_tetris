@@ -42,23 +42,23 @@ class TetrisSystem(ABC):
         pass
 
     @abstractmethod
-    def move_left(self, player: str) -> None:
+    def move_left(self) -> None:
         pass
 
     @abstractmethod
-    def move_right(self, player: str) -> None:
+    def move_right(self) -> None:
         pass
 
     @abstractmethod
-    def move_down(self, player: str) -> None:
+    def move_down(self) -> None:
         pass
 
     @abstractmethod
-    def superdown(self, player: str) -> None:
+    def superdown(self) -> None:
         pass
 
     @abstractmethod
-    def rotate(self, player: str) -> None:
+    def rotate(self) -> None:
         pass
 
 
@@ -83,7 +83,6 @@ class TetrisServerSystem(TetrisSystem):
             self._lock.release()
 
         def recv_ctrl(msg: Message) -> None:
-            self._lock.acquire()
             for ctrl, callback in [
                 ("move_left", self.__tetris.move_left),
                 ("move_right", self.__tetris.move_right),
@@ -92,9 +91,10 @@ class TetrisServerSystem(TetrisSystem):
                 ("rotate", self.__tetris.rotate),
             ]:
                 if msg[1] == ctrl:
+                    self._lock.acquire()
                     callback(self._socket.get_opposite())
+                    self._lock.release()
                     break
-            self._lock.release()
 
         self._socket.enroll_handler(TetrisMessageType.tetris_map_request, send_data)
         self._socket.enroll_handler(TetrisMessageType.score_request, send_data)
@@ -106,8 +106,8 @@ class TetrisServerSystem(TetrisSystem):
         sleep(0)
         self._lock.acquire()
         self.__tetris.start()
-        self._socket.send((TetrisMessageType.game_start, None))
         self._lock.release()
+        self._socket.send((TetrisMessageType.game_start, None))
 
     def update(self) -> None:
         sleep(0)
@@ -115,9 +115,9 @@ class TetrisServerSystem(TetrisSystem):
         pre_state = self.__tetris.get_state()
         self.__tetris.update()
         now_state = self.__tetris.get_state()
+        self._lock.release()
         if (pre_state, now_state) == (1, 2):
             self._socket.send((TetrisMessageType.game_ended, None))
-        self._lock.release()
 
     def get_state(self) -> int:
         sleep(0)
@@ -154,34 +154,34 @@ class TetrisServerSystem(TetrisSystem):
         self._lock.release()
         return result
 
-    def move_left(self, player: str) -> None:
+    def move_left(self) -> None:
         sleep(0)
         self._lock.acquire()
-        self.__tetris.move_left(player)
+        self.__tetris.move_left(self._socket.get_name())
         self._lock.release()
 
-    def move_right(self, player: str) -> None:
+    def move_right(self) -> None:
         sleep(0)
         self._lock.acquire()
-        self.__tetris.move_right(player)
+        self.__tetris.move_right(self._socket.get_name())
         self._lock.release()
 
-    def move_down(self, player: str) -> None:
+    def move_down(self) -> None:
         sleep(0)
         self._lock.acquire()
-        self.__tetris.move_down(player)
+        self.__tetris.move_down(self._socket.get_name())
         self._lock.release()
 
-    def superdown(self, player: str) -> None:
+    def superdown(self) -> None:
         sleep(0)
         self._lock.acquire()
-        self.__tetris.superdown(player)
+        self.__tetris.superdown(self._socket.get_name())
         self._lock.release()
 
-    def rotate(self, player: str) -> None:
+    def rotate(self) -> None:
         sleep(0)
         self._lock.acquire()
-        self.__tetris.rotate(player)
+        self.__tetris.rotate(self._socket.get_name())
         self._lock.release()
 
 
@@ -229,14 +229,11 @@ class TetrisClientSystem(TetrisSystem):
         pass
 
     def update(self) -> None:
-        sleep(0)
-        self._lock.acquire()
         self._socket.send((TetrisMessageType.tetris_map_request, None))
         self._socket.send((TetrisMessageType.score_request, None))
         self._socket.send((TetrisMessageType.queue_request, None))
         self._socket.send((TetrisMessageType.player_pos_request, self._socket.get_opposite()))
         self._socket.send((TetrisMessageType.player_pos_request, self._socket.get_name()))
-        self._lock.release()
 
     def get_state(self) -> int:
         sleep(0)
@@ -279,32 +276,17 @@ class TetrisClientSystem(TetrisSystem):
         self._lock.release()
         return result
 
-    def move_left(self, player: str) -> None:
-        sleep(0)
-        self._lock.acquire()
+    def move_left(self) -> None:
         self._socket.send((TetrisMessageType.control_key, "move_left"))
-        self._lock.release()
 
-    def move_right(self, player: str) -> None:
-        sleep(0)
-        self._lock.acquire()
+    def move_right(self) -> None:
         self._socket.send((TetrisMessageType.control_key, "move_right"))
-        self._lock.release()
 
-    def move_down(self, player: str) -> None:
-        sleep(0)
-        self._lock.acquire()
+    def move_down(self) -> None:
         self._socket.send((TetrisMessageType.control_key, "move_down"))
-        self._lock.release()
 
-    def superdown(self, player: str) -> None:
-        sleep(0)
-        self._lock.acquire()
+    def superdown(self) -> None:
         self._socket.send((TetrisMessageType.control_key, "superdown"))
-        self._lock.release()
 
-    def rotate(self, player: str) -> None:
-        sleep(0)
-        self._lock.acquire()
+    def rotate(self) -> None:
         self._socket.send((TetrisMessageType.control_key, "rotate"))
-        self._lock.release()

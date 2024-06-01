@@ -1,5 +1,6 @@
 import pygame
 from src.module.TetrisSystem import TS
+from src.module.Tetris import TetrisMap
 
 keys = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_SPACE)
 my_color, peer_color = (255, 0, 0), (0, 255, 0)
@@ -17,26 +18,23 @@ block_color = {
 def game_loop(screen: pygame.Surface, system: TS, me: str, peer: str, fps: int = 60) -> None:
     clock = pygame.time.Clock()
     width, height = screen.get_width(), screen.get_height()
-    unit = height // 30
-    done = False
+    unit = height // TetrisMap.height
 
     system.start()
 
-    while not done:
+    while system.get_state() != 2:
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                done = True
             if event.type == pygame.KEYDOWN:
                 if event.key == keys[0]:
-                    system.move_left(me)
+                    system.move_left()
                 if event.key == keys[1]:
-                    system.move_right(me)
+                    system.move_right()
                 if event.key == keys[2]:
-                    system.rotate(me)
+                    system.rotate()
                 if event.key == keys[3]:
-                    system.move_down(me)
+                    system.move_down()
                 if event.key == keys[4]:
-                    system.superdown(me)
+                    system.superdown()
 
         system.update()
 
@@ -67,6 +65,8 @@ if __name__ == "__main__":
     from src.module.TetrisSystem import TetrisServerSystem, TetrisClientSystem
     from time import sleep
     import pygame
+    from random import choice
+    from threading import Thread
 
     server, client = "kim", "Lee"
     server_sock = PairServerSocket(server)
@@ -92,6 +92,18 @@ if __name__ == "__main__":
     server_system = TetrisServerSystem(server_sock)
     client_system = TetrisClientSystem(client_sock)
 
+    pygame.init()
     screen = pygame.display.set_mode((600, 600))
 
+    def client_loop() -> None:
+        print("client entered.")
+        while True:
+            sleep(1)
+            choice([
+                client_system.rotate,
+                client_system.move_left,
+                client_system.move_right,
+            ])()
+
+    Thread(target=client_loop, daemon=True).start()
     game_loop(screen, server_system, server, client)
