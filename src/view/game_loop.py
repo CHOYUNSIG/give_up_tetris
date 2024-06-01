@@ -1,21 +1,20 @@
 import pygame
 from src.module.TetrisSystem import TS
 from src.module.Tetris import TetrisMap
+from res.color import *
 
 keys = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_SPACE)
-my_color, peer_color = (255, 0, 0), (0, 255, 0)
-block_color = {
-    1: (255, 255, 127),
-    2: (127, 255, 127),
-    3: (255, 127, 127),
-    4: (127, 127, 255),
-    5: (255, 191, 127),
-    6: (255, 127, 255),
-    7: (127, 255, 255),
-}
 
 
 def game_loop(screen: pygame.Surface, system: TS, me: str, peer: str, fps: int = 60) -> None:
+    """
+    테트리스 게임 루프
+    :param screen: Pygame 스크린 객체
+    :param system: TetrisSyetem 객체
+    :param me: 플레이어 이름
+    :param peer: 동료 플레이어 이름
+    :param fps: 주사율
+    """
     clock = pygame.time.Clock()
     width, height = screen.get_width(), screen.get_height()
     unit = height // TetrisMap.height
@@ -44,7 +43,7 @@ def game_loop(screen: pygame.Surface, system: TS, me: str, peer: str, fps: int =
         score = system.get_score()
         queue = system.get_queue()
 
-        screen.fill((50, 50, 50))
+        screen.fill(game_bg)
         pygame.draw.rect(screen, (0, 0, 0), (0, 0, unit * 10, unit * 30))
         for color, pos in [(my_color, my_pos), (peer_color, peer_pos)]:
             for i, j in pos:
