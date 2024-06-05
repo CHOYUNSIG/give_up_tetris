@@ -1,6 +1,6 @@
 import pygame
 from src.module.LobbyInterface import LobbyInterface
-from src.util.Button import Button, EdgeButton
+from src.module.Button import Button, EdgeButton
 from src.util.keymap import keymap
 from res.string import String
 from res.color import Color
