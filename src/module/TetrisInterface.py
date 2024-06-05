@@ -1,14 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import TypeVar
+from typing import TypeVar, Final
 from src.module.Tetris import Tetris
 from src.network.PairSocket import Message, PairServerSocket, PairClientSocket, PS
-from src.network.protocol import TetrisMessageType
+from src.network.protocol import TetrisMessageType as Tmt
 from src.util.custom_type import Point, Matrix
 from threading import Lock
 from time import sleep
 
 
-class TetrisSystem(ABC):
+class TetrisInterface(ABC):
     def __init__(self, socket: PS):
         self._socket = socket
         self._lock = Lock()
@@ -62,27 +62,39 @@ class TetrisSystem(ABC):
         pass
 
 
-TS = TypeVar("TS", bound=TetrisSystem)
+TI = TypeVar("TI", bound=TetrisInterface)
 
 
-class TetrisServerSystem(TetrisSystem):
+class TetrisServerInterface(TetrisInterface):
     def __init__(self, socket: PairServerSocket):
         super().__init__(socket)
-        self.__tetris = Tetris(socket.get_name(), socket.get_opposite())
+        self.__opposite: Final[str] = socket.get_opposite()
+        self.__ended = False
+        self.__tetris = Tetris(socket.get_name(), self.__opposite)
 
-        def send_data(msg: Message) -> None:
-            self._lock.acquire()
-            if msg[0] == TetrisMessageType.tetris_map_request:
-                self._socket.send((TetrisMessageType.tetris_map, self.get_map()))
-            elif msg[0] == TetrisMessageType.score_request:
-                self._socket.send((TetrisMessageType.score, self.get_score()))
-            elif msg[0] == TetrisMessageType.queue_request:
-                self._socket.send((TetrisMessageType.queue, self.get_queue()))
-            elif msg[0] == TetrisMessageType.player_pos_request:
-                self._socket.send((TetrisMessageType.player_pos, (msg[1], self.get_position(msg[1]))))
-            self._lock.release()
+        def send_data(msg: Message) -> Message:
+            if msg[0] == Tmt.map_req:
+                return Tmt.map, self.get_map()
+            if msg[0] == Tmt.score_req:
+                return Tmt.score, self.get_score()
+            if msg[0] == Tmt.queue_req:
+                return Tmt.queue, self.get_queue()
+            if msg[0] == Tmt.pos_req:
+                return Tmt.pos, (msg[1], self.get_position(msg[1]))
+            if msg[0] == Tmt.all_req:
+                response = {}
+                self._lock.acquire()
+                response[Tmt.map] = self.__tetris.get_map()
+                response[Tmt.score] = self.__tetris.get_score()
+                response[Tmt.queue] = self.__tetris.get_queue()
+                response[Tmt.pos] = {
+                    self._socket.get_name(): self.__tetris.get_position(self._socket.get_name()),
+                    self.__opposite: self.__tetris.get_position(self.__opposite),
+                }
+                self._lock.release()
+                return Tmt.all, response
 
-        def recv_ctrl(msg: Message) -> None:
+        def recv_ctrl(msg: Message) -> Message:
             for ctrl, callback in [
                 ("move_left", self.__tetris.move_left),
                 ("move_right", self.__tetris.move_right),
@@ -92,32 +104,34 @@ class TetrisServerSystem(TetrisSystem):
             ]:
                 if msg[1] == ctrl:
                     self._lock.acquire()
-                    callback(self._socket.get_opposite())
+                    callback(self.__opposite)
                     self._lock.release()
-                    break
+                    return Tmt.ctrlkey_r, None
 
-        self._socket.enroll_handler(TetrisMessageType.tetris_map_request, send_data)
-        self._socket.enroll_handler(TetrisMessageType.score_request, send_data)
-        self._socket.enroll_handler(TetrisMessageType.queue_request, send_data)
-        self._socket.enroll_handler(TetrisMessageType.player_pos_request, send_data)
-        self._socket.enroll_handler(TetrisMessageType.control_key, recv_ctrl)
+        self._socket.enroll(Tmt.map_req, send_data)
+        self._socket.enroll(Tmt.score_req, send_data)
+        self._socket.enroll(Tmt.queue_req, send_data)
+        self._socket.enroll(Tmt.pos_req, send_data)
+        self._socket.enroll(Tmt.ctrlkey, recv_ctrl)
+        self._socket.enroll(Tmt.all_req, send_data)
 
     def start(self) -> None:
         sleep(0)
         self._lock.acquire()
         self.__tetris.start()
         self._lock.release()
-        self._socket.send((TetrisMessageType.game_start, None))
+        while not self._socket.request((Tmt.mdchngd, None), Tmt.mdchngd_r)[1]:
+            continue
+        self._socket.request((Tmt.start, None), Tmt.start_r)
 
     def update(self) -> None:
         sleep(0)
         self._lock.acquire()
-        pre_state = self.__tetris.get_state()
         self.__tetris.update()
-        now_state = self.__tetris.get_state()
+        if self.__tetris.get_state() == 2 and not self.__ended:
+            self.__ended = True
+            self._socket.request((Tmt.ended, None), Tmt.ended_r)
         self._lock.release()
-        if (pre_state, now_state) == (1, 2):
-            self._socket.send((TetrisMessageType.game_ended, None))
 
     def get_state(self) -> int:
         sleep(0)
@@ -185,55 +199,49 @@ class TetrisServerSystem(TetrisSystem):
         self._lock.release()
 
 
-class TetrisClientSystem(TetrisSystem):
+class TetrisClientInterface(TetrisInterface):
     def __init__(self, socket: PairClientSocket):
         super().__init__(socket)
-        self.__map: Matrix | None = None
-        self.__score: int | None = None
-        self.__player_pos: dict[str, list[Point]] | None = None
-        self.__queue: list[Matrix] | None = None
+        self.__map: Matrix = []
+        self.__score: int = 0
+        self.__player_pos: dict[str, list[Point]] = {
+            self._socket.get_name(): [],
+            self._socket.get_opposite(): [],
+        }
+        self.__queue: list[Matrix] = []
         self.__started = False
         self.__ended = False
 
-        def recv_data(msg: Message) -> None:
-            self._lock.acquire()
-            if msg[0] == TetrisMessageType.tetris_map:
-                self.__map = msg[1]
-            elif msg[0] == TetrisMessageType.score:
-                self.__score = msg[1]
-            elif msg[0] == TetrisMessageType.player_pos:
-                player, pos = msg[1]
-                if self.__player_pos is None:
-                    self.__player_pos = {}
-                self.__player_pos[player] = msg[1]
-            elif msg[0] == TetrisMessageType.queue:
-                self.__queue = msg[1]
-            self._lock.release()
+        def ready(msg: Message) -> Message:
+            return Tmt.mdchngd_r, True
 
-        def recv_gamestate(msg: Message) -> None:
+        def recv_gamestate(msg: Message) -> Message:
             self._lock.acquire()
-            if msg[0] == TetrisMessageType.game_start:
+            if msg[0] == Tmt.start:
                 self.__started = True
-            elif msg[0] == TetrisMessageType.game_ended:
+                self._lock.release()
+                return Tmt.start_r, None
+            elif msg[0] == Tmt.ended:
                 self.__ended = True
-            self._lock.release()
+                self._lock.release()
+                return Tmt.ended_r, None
 
-        self._socket.enroll_handler(TetrisMessageType.tetris_map, recv_data)
-        self._socket.enroll_handler(TetrisMessageType.score, recv_data)
-        self._socket.enroll_handler(TetrisMessageType.queue, recv_data)
-        self._socket.enroll_handler(TetrisMessageType.player_pos, recv_data)
-        self._socket.enroll_handler(TetrisMessageType.game_start, recv_gamestate)
-        self._socket.enroll_handler(TetrisMessageType.game_ended, recv_gamestate)
+        self._socket.enroll(Tmt.start, recv_gamestate)
+        self._socket.enroll(Tmt.ended, recv_gamestate)
+        self._socket.enroll(Tmt.mdchngd, ready)
 
     def start(self) -> None:
-        pass
+        self.update()
 
     def update(self) -> None:
-        self._socket.send((TetrisMessageType.tetris_map_request, None))
-        self._socket.send((TetrisMessageType.score_request, None))
-        self._socket.send((TetrisMessageType.queue_request, None))
-        self._socket.send((TetrisMessageType.player_pos_request, self._socket.get_opposite()))
-        self._socket.send((TetrisMessageType.player_pos_request, self._socket.get_name()))
+        response = self._socket.request((Tmt.all_req, None), Tmt.all)[1]
+        sleep(0)
+        self._lock.acquire()
+        self.__map = response[Tmt.map]
+        self.__score = response[Tmt.score]
+        self.__queue = response[Tmt.queue]
+        self.__player_pos = response[Tmt.pos]
+        self._lock.release()
 
     def get_state(self) -> int:
         sleep(0)
@@ -249,44 +257,28 @@ class TetrisClientSystem(TetrisSystem):
             return 2
 
     def get_map(self) -> Matrix:
-        sleep(0)
-        self._lock.acquire()
-        result = self.__map
-        self._lock.release()
-        return result
+        return self.__map
 
     def get_score(self) -> int:
-        sleep(0)
-        self._lock.acquire()
-        result = self.__score
-        self._lock.release()
-        return result
+        return self.__score
 
     def get_queue(self) -> list[Matrix]:
-        sleep(0)
-        self._lock.acquire()
-        result = self.__queue
-        self._lock.release()
-        return result
+        return self.__queue
 
     def get_position(self, player: str) -> list[Point]:
-        sleep(0)
-        self._lock.acquire()
-        result = self.__player_pos[player]
-        self._lock.release()
-        return result
+        return self.__player_pos[player]
 
     def move_left(self) -> None:
-        self._socket.send((TetrisMessageType.control_key, "move_left"))
+        self._socket.request((Tmt.ctrlkey, "move_left"), Tmt.ctrlkey_r)
 
     def move_right(self) -> None:
-        self._socket.send((TetrisMessageType.control_key, "move_right"))
+        self._socket.request((Tmt.ctrlkey, "move_right"), Tmt.ctrlkey_r)
 
     def move_down(self) -> None:
-        self._socket.send((TetrisMessageType.control_key, "move_down"))
+        self._socket.request((Tmt.ctrlkey, "move_down"), Tmt.ctrlkey_r)
 
     def superdown(self) -> None:
-        self._socket.send((TetrisMessageType.control_key, "superdown"))
+        self._socket.request((Tmt.ctrlkey, "superdown"), Tmt.ctrlkey_r)
 
     def rotate(self) -> None:
-        self._socket.send((TetrisMessageType.control_key, "rotate"))
+        self._socket.request((Tmt.ctrlkey, "rotate"), Tmt.ctrlkey_r)

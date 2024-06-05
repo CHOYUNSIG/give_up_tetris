@@ -2,57 +2,55 @@ import socket
 from abc import ABC, abstractmethod
 from enum import IntEnum, unique
 from pickle import dumps, loads
-from queue import Queue
 from threading import Thread, Lock
-from typing import Type, Callable, TypeVar, Final
 from time import sleep
+from typing import Type, Callable, TypeVar, Final
 
 
 @unique
 class MessageType(IntEnum):
     """
     메시지의 타입을 정의한 열거형
+    메시지 타입은 반드시 요청과 응답 쌍을 가지고 있어야 한다.
     """
     pass
 
 
 MT = TypeVar("MT", bound=MessageType)
-Message = tuple[MT, any]  # 메시지의 정의
+MTI = MT | int
+Message = tuple[MTI, any]  # 메시지의 정의
 
 
 class PairSocket(ABC):
     def __init__(self, name: str):
         """
-        비동기 버퍼링, 스레드 안정성 소켓
+        요청-응답 형식의 스레드 안정성 소켓
         """
         self._name: Final[str] = name
-        self._opposite_name: str | None = None
         self._socket: socket.socket | None = None
-        self._message_queue: Queue[Message] = Queue()
-        self._handler_map: dict[MT, Callable[[Message], None]] = {}
+        self._handler_map: dict[MTI, Callable[[Message], Message]] = {}
+        self.__response: dict[MTI, Message] = {}
         self._lock = Lock()
 
-        def socket_handler() -> None:
-            self._lock.acquire()
-            self._socket.send(dumps((-1, self._name)))
-            self._lock.release()
+        def introduce(msg: Message) -> Message:
+            self._opposite_name = msg[1]
+            return -2, self._name
+
+        self._handler_map[-1] = introduce
+
+        def receive() -> None:
             try:
                 while True:
-                    packet = self._socket.recv(1024)
+                    packet = self._socket.recv(4096)
                     if len(packet) == 0:
                         break
                     msg: Message = loads(packet)
                     msgtype, body = msg
                     self._lock.acquire()
-                    if msgtype in self._handler_map:
-                        handler = self._handler_map[msgtype]
-                        self._lock.release()
-                        handler(msg)
-                        self._lock.acquire()
-                    elif msgtype == -1:  # 소개
-                        self._opposite_name = body
-                    else:
-                        self._message_queue.put(msg)
+                    if msgtype in self._handler_map:  # 요청 메시지일 시
+                        self._socket.send(dumps(self._handler_map[msgtype](msg)))
+                    else:  # 응답 메시지일 시
+                        self.__response[msgtype] = msg
                     self._lock.release()
             except OSError:
                 try:
@@ -63,10 +61,9 @@ class PairSocket(ABC):
                 self._lock.acquire()
                 self._socket.close()
                 self._socket = None
-                self._opposite_name = None
                 self._lock.release()
 
-        self._message_handler = socket_handler
+        self._message_handler = receive
 
     @abstractmethod
     def start(self, ip: str, port: int) -> None:
@@ -78,45 +75,49 @@ class PairSocket(ABC):
         pass
 
     def get_name(self) -> str:
+        """
+        자신의 이름을 반환한다.
+        :return: 이름
+        """
         return self._name
 
     def get_opposite(self) -> str | None:
         """
-        소켓이 연결된 상태인지를 확인한다. 연결되어있다면 연결 상대의 이름을 반환한다.
+        연결 상대의 이름을 반환한다.
         :return: 연결되었다면 상대의 이름을, 그렇지 않으면 None을 반환한다.
         """
-        sleep(0)
-        self._lock.acquire()
-        opposite = self._opposite_name
-        self._lock.release()
-        return opposite
-
-    def take(self) -> Message | None:
-        """
-        메시지 큐에서 메시지를 꺼낸다.
-        :return: 메시지가 있으면 메시지를, 없으면 None을 반환한다.
-        """
-        if self._message_queue.empty():
+        result = self.request((-1, None), -2)
+        if result is None:
             return None
-        return self._message_queue.get()
+        return result[1]
 
-    def send(self, msg: Message) -> bool:
+    def request(self, msg: Message, response_type: MTI) -> Message | None:
         """
-        메시지를 보낸다
+        메시지를 보내고 응답을 받은 뒤 반환한다.
         :param msg: 메시지 객체
-        :return: 메시지를 보내는 데 성공하면 True, 그렇지 않으면 False를 반환한다.
+        :param response_type: 응답 형식
+        :return: 응답 메시지 객체
         """
         try:
-            sleep(0)
             self._lock.acquire()
             self._socket.send(dumps(msg))
-            return True
-        except OSError:
-            return False
-        finally:
             self._lock.release()
+            while True:
+                self._lock.acquire()
+                if response_type in self.__response:
+                    result = self.__response[response_type]
+                    self.__response.pop(response_type)
+                    return result
+                self._lock.release()
+        except (OSError, AttributeError):
+            return None
+        finally:
+            try:
+                self._lock.release()
+            except RuntimeError:
+                pass
 
-    def enroll_handler(self, msgtype: Type[MT], handler: Callable[[Message], None]) -> None:
+    def enroll(self, msgtype: Type[MTI], handler: Callable[[Message], Message]) -> None:
         """
         메시지 핸들러를 등록한다.
         :param msgtype: 메시지 타입
@@ -244,11 +245,10 @@ if __name__ == "__main__":
             print("Client connected.")
             break
 
-    c.send((TetrisMessageType.chat, "hello"))
-    while True:
-        m = s.take()
-        if m is not None and m[0] == TetrisMessageType.chat:
-            print("server gets: " + m[1])
-            break
+    def echo(msg: Message) -> Message:
+        return msg
+    s.enroll(TetrisMessageType.chat, echo)
 
+    m = c.request((TetrisMessageType.chat, "hello"), TetrisMessageType.chat_r)
+    print("server gets: " + m[1])
     print("Test clear.")
