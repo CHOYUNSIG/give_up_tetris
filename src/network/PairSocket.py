@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from enum import IntEnum, unique
 from pickle import dumps, loads
 from threading import Thread, Lock, Semaphore
-from time import sleep
 from typing import Type, Callable, TypeVar, Final
 
 
@@ -48,19 +47,20 @@ class PairSocket(ABC):
                     if len(packet) == 0:
                         break
                     msg: Message = loads(packet)
-                    msgtype, body = msg
-                    print("got : " + str(msg))
                     handler: Callable[[Message], Message] | None = None
                     with self._lock:
-                        if msgtype in self._handler_map:  # 요청 메시지일 시
-                            handler = self._handler_map[msgtype]
+                        if msg[0] in self._handler_map:  # 요청 메시지일 시
+                            handler = self._handler_map[msg[0]]
                         else:  # 응답 메시지일 시
-                            self.__response[msgtype] = msg
+                            self.__response[msg[0]] = msg
                     if handler is not None:
-                        response = handler(msg)
-                        with self._lock:
-                            print("give : " + str(response))
-                            self._socket.send(dumps(response))
+
+                        def send_thread(h: Callable[[Message], Message]) -> None:
+                            response = h(msg)
+                            with self._lock:
+                                self._socket.send(dumps(response))
+
+                        Thread(target=send_thread, args=(handler,), daemon=True).start()
             except OSError:
                 pass
             finally:
@@ -127,7 +127,6 @@ class PairSocket(ABC):
         :param msgtype: 메시지 타입
         :param handler: 핸들러 함수
         """
-        sleep(0)
         with self._lock:
             self._handler_map[msgtype] = handler
 
@@ -149,7 +148,6 @@ class PairClientSocket(PairSocket):
         self.__connecting = False
 
     def start(self, ip: str, port: int, sem: Semaphore | None = None) -> None:
-        sleep(0)
         with self._lock:
             connecting = self.__connecting
         connecting |= self.get_opposite() is not None
@@ -186,7 +184,6 @@ class PairClientSocket(PairSocket):
         소켓이 연결 중인지를 확인한다.
         :return: 연결 중이면 True, 그렇지 않으면 False를 반환한다.
         """
-        sleep(0)
         with self._lock:
             return self.__connecting
 
@@ -200,7 +197,6 @@ class PairServerSocket(PairSocket):
         self.__started = False
 
     def start(self, ip: str, port: int, sem: Semaphore | None = None) -> None:
-        sleep(0)
         with self._lock:
             started = self.__started
         if started:

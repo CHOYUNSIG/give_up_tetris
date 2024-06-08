@@ -5,7 +5,6 @@ from src.network.PairSocket import Message, PairServerSocket, PairClientSocket, 
 from src.network.protocol import TetrisMessageType as Tmt
 from src.util.custom_type import Point, Matrix
 from threading import Lock
-from time import sleep
 
 
 class TetrisInterface(ABC):
@@ -120,7 +119,6 @@ class TetrisServerInterface(TetrisInterface):
         self._socket.enroll(Tmt.all_req, send_data)
 
     def start(self) -> None:
-        sleep(0)
         with self._lock:
             self.__tetris.start()
         while not self._socket.request((Tmt.mdchngd, None), Tmt.mdchngd_r)[1]:
@@ -128,7 +126,6 @@ class TetrisServerInterface(TetrisInterface):
         self._socket.request((Tmt.start, None), Tmt.start_r)
 
     def update(self) -> None:
-        sleep(0)
         with self._lock:
             self.__tetris.update()
             if self.__tetris.get_state() == 2 and not self.__ended:
@@ -136,52 +133,42 @@ class TetrisServerInterface(TetrisInterface):
                 self._socket.request((Tmt.ended, None), Tmt.ended_r)
 
     def get_state(self) -> int:
-        sleep(0)
         with self._lock:
             return self.__tetris.get_state()
 
     def get_map(self) -> Matrix:
-        sleep(0)
         with self._lock:
             return self.__tetris.get_map()
 
     def get_score(self) -> int:
-        sleep(0)
         with self._lock:
             return self.__tetris.get_score()
 
     def get_queue(self) -> list[Matrix]:
-        sleep(0)
         with self._lock:
             return self.__tetris.get_queue()
 
     def get_position(self, player: str) -> list[Point]:
-        sleep(0)
         with self._lock:
             return self.__tetris.get_position(player)
 
     def move_left(self) -> None:
-        sleep(0)
         with self._lock:
             self.__tetris.move_left(self._socket.get_name())
 
     def move_right(self) -> None:
-        sleep(0)
         with self._lock:
             self.__tetris.move_right(self._socket.get_name())
 
     def move_down(self) -> None:
-        sleep(0)
         with self._lock:
             self.__tetris.move_down(self._socket.get_name())
 
     def superdown(self) -> None:
-        sleep(0)
         with self._lock:
             self.__tetris.superdown(self._socket.get_name())
 
     def rotate(self) -> None:
-        sleep(0)
         with self._lock:
             self.__tetris.rotate(self._socket.get_name())
 
@@ -224,7 +211,6 @@ class TetrisClientInterface(TetrisInterface):
 
     def update(self) -> None:
         response = self._socket.request((Tmt.all_req, None), Tmt.all)[1]
-        sleep(0)
         with self._lock:
             self.__map = response[Tmt.map]
             self.__score = response[Tmt.score]
@@ -232,7 +218,6 @@ class TetrisClientInterface(TetrisInterface):
             self.__player_pos = response[Tmt.pos]
 
     def get_state(self) -> int:
-        sleep(0)
         with self._lock:
             if not self.__started:
                 return 0

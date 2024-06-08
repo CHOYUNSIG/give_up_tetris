@@ -25,7 +25,6 @@ def main_loop(screen: pygame.Surface, name: str, fps: int = 60) -> None:
             tetris = TetrisClientInterface(socket)
 
         game_loop(screen, tetris, fps)
-        print("ended")
 
 
 if __name__ == "__main__":
