@@ -6,3 +6,4 @@ class String(Enum):
     scan = "Scan"
     scanning = "Scanning"
     connect = "Connect"
+    connecting = "Connecting"

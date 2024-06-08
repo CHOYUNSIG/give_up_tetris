@@ -24,7 +24,7 @@ def main_loop(screen: pygame.Surface, name: str, fps: int = 60) -> None:
         else:
             tetris = TetrisClientInterface(socket)
 
-        game_loop(screen, tetris, name, socket.get_opposite(), fps)
+        game_loop(screen, tetris, fps)
 
 
 if __name__ == "__main__":
