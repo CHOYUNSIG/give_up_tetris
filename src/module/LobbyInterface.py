@@ -68,6 +68,9 @@ class LobbyInterface:
     def is_connected(self) -> bool:
         return self.__socket.is_connected()
 
+    def get_name(self) -> str:
+        return self.__name
+
     def get_opposite(self) -> str | None:
         return self.__socket.get_opposite()
 

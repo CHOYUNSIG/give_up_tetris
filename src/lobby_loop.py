@@ -16,7 +16,6 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
     fonts = [pygame.font.SysFont(None, 10 * i) for i in range(10)]
     
     # 상태
-    done = False
     chating = ""
     scanning = False
     connecting = False
@@ -99,7 +98,7 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
 
     interface.start()
 
-    while not done:
+    while not interface.check_ready():
         for event in pygame.event.get():
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 Button.spread_click(pygame.mouse.get_pos())
@@ -157,10 +156,25 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
 
         screen.fill((0, 0, 0))
         Button.spread_draw(screen)
+
         screen.blit(
             fonts[3].render(chating, True, Color.white.value),
             (width // 2, height - 200)
         )
+        screen.blit(
+            fonts[3].render("me: " + interface.get_name(), True, Color.white.value),
+            (width // 2, height - 170)
+        )
+        opposite = interface.get_opposite()
+        if opposite is None:
+            opposite = "Peer is not connected."
+        else:
+            opposite = "peer: " + opposite
+        screen.blit(
+            fonts[3].render(opposite, True, Color.white.value),
+            (width // 2, height - 140)
+        )
+
         text_high = 10
         for index, (name, chat) in enumerate(chat_list[-10:]):
             text = fonts[3].render(name + ": " + chat, True, Color.white.value)
@@ -169,10 +183,8 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
                 (width // 2, text_high)
             )
             text_high += text.get_height() + 10
-        pygame.display.update()
 
-        if interface.check_ready():
-            done = True
+        pygame.display.update()
 
         clock.tick(fps)
 
