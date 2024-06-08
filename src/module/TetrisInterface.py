@@ -191,7 +191,6 @@ class TetrisClientInterface(TetrisInterface):
             return Tmt.mdchngd_r, True
 
         def recv_gamestate(msg: Message) -> Message:
-            print(msg)
             if msg[0] == Tmt.start:
                 self.__started = True
                 return Tmt.start_r, None

@@ -1,69 +1,29 @@
-from abc import ABC, abstractmethod
-import pygame
-from src.util.custom_type import Point
+from abc import ABCMeta
 from typing import Callable
 
+import pygame
 
-class Button(ABC):
-    buttons: set['Button'] = set()
+from src.util.custom_type import Point
+from src.view.widget import Drawable, Clickable
 
-    @staticmethod
-    def spread_click(pos: Point) -> None:
-        """
-        모든 버튼에 클릭 이벤트를 전파한다.
-        :param pos: 마우스가 클릭된 위치
-        """
-        for button in Button.buttons.copy():
-            if button._clickable and button._rect.collidepoint(pos):
-                button.click()
 
-    @staticmethod
-    def spread_draw(screen: pygame.Surface) -> None:
-        """
-        모든 버튼을 화면에 그린다.
-        :param screen: 화면 객체
-        """
-        for button in Button.buttons:
-            if button._drawable:
-                button.draw(screen)
-
+class Button(Drawable, Clickable, metaclass=ABCMeta):
     def __init__(self, point: Point, size: Point, callback: Callable[[], None]):
         """
-        버튼 인터페이스
+        버튼 클래스
         :param point: 시작점
         :param size: 크기
         """
-        self._rect = pygame.rect.Rect(*point, *size)
-        self._clickable = False
-        self._drawable = False
-        self._callback = callback
-        Button.buttons.add(self)
+        Drawable.__init__(self)
+        Clickable.__init__(self, point, size, callback)
 
     def activate(self) -> None:
-        self._clickable = True
-        self._drawable = True
+        Drawable.activate(self)
+        Clickable.activate(self)
 
     def kill(self) -> None:
-        """
-        버튼을 삭제한다.
-        """
-        self._clickable = False
-        self._drawable = False
-        Button.buttons.remove(self)
-
-    def click(self) -> None:
-        """
-        클릭되었을 때의 행동을 정의한다.
-        """
-        self._callback()
-
-    @abstractmethod
-    def draw(self, screen: pygame.Surface) -> None:
-        """
-        버튼을 그리는 방법을 정의하여야 한다.
-        :param screen: 화면 객체
-        """
-        pass
+        Drawable.kill(self)
+        Clickable.kill(self)
 
 
 class TextButton(Button):
@@ -84,22 +44,21 @@ class TextButton(Button):
         :param color: 글자 색
         """
         super().__init__(point, size, callback)
-        self._text = text
-        self._font = font
-        self._color = color
+        self.text = text
+        self.color = color
+        self.font = font
 
     def draw(self, screen: pygame.Surface) -> None:
-        text = self._font.render(self._text, True, self._color)
+        text = self.font.render(self.text, True, self.color)
         text_center = text.get_rect().center
-        real_center = self._rect.center
-        move = (real_center[0] - text_center[0], real_center[1] - text_center[1])
-        screen.blit(self._font.render(self._text, True, self._color), move)
+        real_center = self.rect.center
+        screen.blit(text, (real_center[0] - text_center[0], real_center[1] - text_center[1]))
 
     def change_text(self, text: str) -> None:
-        self._text = text
+        self.text = text
 
     def change_color(self, color: tuple[int, int, int]):
-        self._color = color
+        self.color = color
 
 
 class EdgeButton(TextButton):
@@ -110,7 +69,8 @@ class EdgeButton(TextButton):
                  text: str,
                  font: pygame.font.Font,
                  color: tuple[int, int, int],
-                 thickness: int):
+                 padding: int = 10,
+                 thickness: int = 3):
         """
         테두리 텍스트 버튼
         :param point: 시작점
@@ -122,10 +82,12 @@ class EdgeButton(TextButton):
         :param thickness: 테두리 굵기
         """
         super().__init__(point, size, callback, text, font, color)
-        self._thickness = thickness
+        self.padding = padding
+        self.thickness = thickness
 
     def draw(self, screen: pygame.Surface) -> None:
-        pygame.draw.rect(screen, self._color, self._rect, self._thickness)
+        rect = (self.rect.topleft[0] + self.padding, self.rect.topleft[1] + self.padding, self.rect.width - 2 * self.padding, self.rect.height - 2 * self.padding)
+        pygame.draw.rect(screen, self.color, rect, self.thickness)
         super().draw(screen)
 
 
@@ -146,4 +108,4 @@ class ImageButton(Button):
         self.image = image
 
     def draw(self, screen: pygame.Surface) -> None:
-        screen.blit(self.image, self._rect)
+        screen.blit(self.image, self.rect)
