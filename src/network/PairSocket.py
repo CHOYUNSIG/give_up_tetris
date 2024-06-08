@@ -148,13 +148,9 @@ class PairClientSocket(PairSocket):
         self.__connecting = False
 
     def start(self, ip: str, port: int, sem: Semaphore | None = None) -> None:
-        with self._lock:
-            connecting = self.__connecting
-        connecting |= self.get_opposite() is not None
-        if connecting:
+        if self.__connecting | self.is_connected():
             return
-        with self._lock:
-            self.__connecting = True
+        self.__connecting = True
         if sem is not None:
             sem.release()
 
@@ -166,16 +162,14 @@ class PairClientSocket(PairSocket):
                 sock.settimeout(1)
                 sock.connect((ip, port))
                 sock.settimeout(None)
-                with self._lock:
-                    self.__connecting = False
-                    self._socket = sock
+                self.__connecting = False
+                self._socket = sock
                 self._message_handler()
             except OSError:
                 pass
             finally:
-                with self._lock:
-                    self.__connecting = False
-                    self._socket = None
+                self.__connecting = False
+                self._socket = None
 
         Thread(target=connect, daemon=True).start()
 
@@ -184,8 +178,7 @@ class PairClientSocket(PairSocket):
         소켓이 연결 중인지를 확인한다.
         :return: 연결 중이면 True, 그렇지 않으면 False를 반환한다.
         """
-        with self._lock:
-            return self.__connecting
+        return self.__connecting
 
 
 class PairServerSocket(PairSocket):
@@ -197,12 +190,9 @@ class PairServerSocket(PairSocket):
         self.__started = False
 
     def start(self, ip: str, port: int, sem: Semaphore | None = None) -> None:
-        with self._lock:
-            started = self.__started
-        if started:
+        if self.__started:
             return
-        with self._lock:
-            self.__started = True
+        self.__started = True
         if sem is not None:
             sem.release()
 
@@ -215,8 +205,7 @@ class PairServerSocket(PairSocket):
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2 ** 20)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 ** 20)
                 sock.settimeout(None)
-                with self._lock:
-                    self._socket = sock
+                self._socket = sock
                 self._message_handler()
 
         Thread(target=accept, daemon=True).start()

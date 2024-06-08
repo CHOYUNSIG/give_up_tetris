@@ -74,7 +74,8 @@ TI = TypeVar("TI", bound=TetrisInterface)
 class TetrisServerInterface(TetrisInterface):
     def __init__(self, socket: PairServerSocket):
         super().__init__(socket)
-        self.__ended = False
+        self.__state = 0
+        self.__end_flag = False
         self.__tetris = Tetris(socket.get_name(), self.get_opposite())
 
         def send_data(msg: Message) -> Message:
@@ -128,13 +129,13 @@ class TetrisServerInterface(TetrisInterface):
     def update(self) -> None:
         with self._lock:
             self.__tetris.update()
-            if self.__tetris.get_state() == 2 and not self.__ended:
-                self.__ended = True
+            self.__state = self.__tetris.get_state()
+            if self.__state == 2 and not self.__end_flag:
+                self.__end_flag = True
                 self._socket.request((Tmt.ended, None), Tmt.ended_r)
 
     def get_state(self) -> int:
-        with self._lock:
-            return self.__tetris.get_state()
+        return self.__state
 
     def get_map(self) -> Matrix:
         with self._lock:
@@ -190,13 +191,13 @@ class TetrisClientInterface(TetrisInterface):
             return Tmt.mdchngd_r, True
 
         def recv_gamestate(msg: Message) -> Message:
-            with self._lock:
-                if msg[0] == Tmt.start:
-                    self.__started = True
-                    return Tmt.start_r, None
-                elif msg[0] == Tmt.ended:
-                    self.__ended = True
-                    return Tmt.ended_r, None
+            print(msg)
+            if msg[0] == Tmt.start:
+                self.__started = True
+                return Tmt.start_r, None
+            elif msg[0] == Tmt.ended:
+                self.__ended = True
+                return Tmt.ended_r, None
 
         self._socket.enroll(Tmt.start, recv_gamestate)
         self._socket.enroll(Tmt.ended, recv_gamestate)
@@ -204,27 +205,24 @@ class TetrisClientInterface(TetrisInterface):
 
     def start(self) -> None:
         while True:
-            with self._lock:
-                if self.__started:
-                    break
+            if self.__started:
+                break
         self.update()
 
     def update(self) -> None:
         response = self._socket.request((Tmt.all_req, None), Tmt.all)[1]
-        with self._lock:
-            self.__map = response[Tmt.map]
-            self.__score = response[Tmt.score]
-            self.__queue = response[Tmt.queue]
-            self.__player_pos = response[Tmt.pos]
+        self.__map = response[Tmt.map]
+        self.__score = response[Tmt.score]
+        self.__queue = response[Tmt.queue]
+        self.__player_pos = response[Tmt.pos]
 
     def get_state(self) -> int:
-        with self._lock:
-            if not self.__started:
-                return 0
-            elif not self.__ended:
-                return 1
-            else:
-                return 2
+        if not self.__started:
+            return 0
+        elif not self.__ended:
+            return 1
+        else:
+            return 2
 
     def get_map(self) -> Matrix:
         return self.__map
