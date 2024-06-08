@@ -216,6 +216,10 @@ class TetrisClientInterface(TetrisInterface):
         self._socket.enroll(Tmt.mdchngd, ready)
 
     def start(self) -> None:
+        while True:
+            with self._lock:
+                if self.__started:
+                    break
         self.update()
 
     def update(self) -> None:

@@ -1,4 +1,4 @@
-from src.network.PairSocket import PS, PairServerSocket, PairClientSocket, Message
+from src.network.PairSocket import PS, PairServerSocket, PairClientSocket, Message, PairSocket
 from src.network.protocol import tetris_port, TetrisMessageType as Tmt
 from src.network.ServerScanner import ServerScanner
 from typing import Final
@@ -12,7 +12,7 @@ class LobbyInterface:
         if type(socket_or_name) is str:
             self.__socket: PS = PairServerSocket(socket_or_name)
             self.__name = socket_or_name
-        elif type(socket_or_name) is PS:
+        elif isinstance(socket_or_name, PairSocket):
             self.__socket: PS = socket_or_name
             self.__name = socket_or_name.get_name()
         self.__lock = Lock()
