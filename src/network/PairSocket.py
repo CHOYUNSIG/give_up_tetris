@@ -27,6 +27,7 @@ class PairSocket(ABC):
         요청-응답 형식의 스레드 안정성 소켓
         """
         self._name: Final[str] = name
+        self._opposite_name: str | None = None
         self._socket: socket.socket | None = None
         self._handler_map: dict[MTI, Callable[[Message], Message]] = {}
         self._lock = Lock()
@@ -39,6 +40,8 @@ class PairSocket(ABC):
         self._handler_map[-1] = introduce
 
         def message_handler() -> None:
+            with self._lock:
+                self._socket.send(dumps((-1, self._name)))
             try:
                 while True:
                     packet = self._socket.recv(4096)
@@ -46,9 +49,12 @@ class PairSocket(ABC):
                         break
                     msg: Message = loads(packet)
                     msgtype, body = msg
+                    print("got : " + str(msg))
                     with self._lock:
                         if msgtype in self._handler_map:  # 요청 메시지일 시
-                            self._socket.send(dumps(self._handler_map[msgtype](msg)))
+                            response = self._handler_map[msgtype](msg)
+                            print("give : " + str(response))
+                            self._socket.send(dumps(response))
                         else:  # 응답 메시지일 시
                             self.__response[msgtype] = msg
             except OSError:
@@ -57,6 +63,7 @@ class PairSocket(ABC):
                 with self._lock:
                     self._socket.close()
                     self._socket = None
+                    self._opposite_name = None
                 if on_disconnected is not None:
                     on_disconnected()
 
@@ -84,19 +91,14 @@ class PairSocket(ABC):
         연결 상대의 이름을 반환한다.
         :return: 연결되었다면 상대의 이름을, 그렇지 않으면 None을 반환한다.
         """
-        result = self.request((-1, None), -2)
-        if result is None:
-            return None
-        return result[1]
+        return self._opposite_name
 
     def is_connected(self) -> bool:
         """
         연결되어있는지를 확인한다.
         :return: 연결되어있다면 True, 그렇지 않으면 False를 반환한다.
         """
-        sleep(0)
-        with self._lock:
-            return self._socket is not None
+        return self._socket is not None
 
     def request(self, msg: Message, response_type: MTI) -> Message | None:
         """
@@ -126,6 +128,11 @@ class PairSocket(ABC):
         sleep(0)
         with self._lock:
             self._handler_map[msgtype] = handler
+
+    def kill(self) -> None:
+        with self._lock:
+            if self._socket is not None:
+                self._socket.close()
 
 
 PS = TypeVar("PS", bound=PairSocket)
