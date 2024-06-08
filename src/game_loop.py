@@ -1,6 +1,7 @@
 import pygame
 
 from res.color import Color
+from res.font.font import fonts
 from src.module.Tetris import TetrisMap
 from src.module.TetrisInterface import TI
 
@@ -18,9 +19,11 @@ def game_loop(screen: pygame.Surface, interface: TI, fps: int = 60) -> None:
     width, height = screen.get_width(), screen.get_height()
     unit = height // TetrisMap.height
 
+    done = False
+    
     interface.start()
 
-    while interface.get_state() != 2:
+    while not done:
         for event in pygame.event.get():
             if event.type == pygame.KEYDOWN:
                 if event.key == keys[0]:
@@ -33,22 +36,22 @@ def game_loop(screen: pygame.Surface, interface: TI, fps: int = 60) -> None:
                     interface.move_down()
                 if event.key == keys[4]:
                     interface.superdown()
+                if event.key == pygame.K_RETURN and interface.get_state() == 2:
+                    done = True
 
         interface.update()
 
-        tetris_map = interface.get_map()
-        my_pos = interface.get_position(interface.get_name())
-        peer_pos = interface.get_position(interface.get_opposite())
-        score = interface.get_score()
-        queue = interface.get_queue()
+        screen.fill(Color.black.value)
 
-        screen.fill(Color.game_bg.value)
-
-        pygame.draw.rect(screen, Color.black.value, (0, 0, unit * 10, unit * 30))
-        for color, pos in [(Color.my_egde.value, my_pos), (Color.peer_edge.value, peer_pos)]:
+        pygame.draw.rect(screen, Color.white.value, (0, 0, unit * 10, unit * 30), 1)
+        for color, pos in [
+            (Color.my_egde.value, interface.get_position(interface.get_name())),
+            (Color.peer_edge.value, interface.get_position(interface.get_opposite()))
+        ]:
             for i, j in pos:
                 pygame.draw.rect(screen, color, (j * unit - 2, i * unit - 2, unit + 4, unit + 4))
 
+        tetris_map = interface.get_map()
         for i in range(len(tetris_map)):
             for j in range(len(tetris_map[i])):
                 if tetris_map[i][j]:
@@ -57,6 +60,36 @@ def game_loop(screen: pygame.Surface, interface: TI, fps: int = 60) -> None:
                         Color.blocks.value[tetris_map[i][j]],
                         (j * unit, i * unit, unit, unit)
                     )
+
+        offset = height // 2 - 30
+        for index, (content, font_size) in enumerate([
+            ("Peer: " + interface.get_opposite(), 4),
+            ("Score: " + str(interface.get_score()), 5),
+            ("Game Over", 6),
+            ("Press enter to exit.", 4),
+        ]):
+            if interface.get_state() != 2 and 2 <= index:
+                break
+            text = fonts[font_size].render(content, True, Color.white.value)
+            screen.blit(
+                text,
+                (unit * (TetrisMap.width + 3), offset)
+            )
+            offset += text.get_height() + 10
+
+        offset = TetrisMap.width + 1
+        for index, block in enumerate(interface.get_queue()[:3]):
+            last = 0
+            for i in range(5):
+                for j in range(5):
+                    if j < len(block) and i < len(block[j]) and block[j][i]:
+                        last = i
+                        pygame.draw.rect(
+                            screen,
+                            Color.lightgrey.value,
+                            ((offset + i) * unit, (1 + j) * unit, unit, unit)
+                        )
+            offset += last + 2
 
         pygame.display.update()
 

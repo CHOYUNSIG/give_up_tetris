@@ -11,13 +11,13 @@ from src.view.Alignment import Alignment
 from src.view.Button import EdgeButton
 from src.view.TextHolder import TextHolder
 from src.view.widget import Drawable, Clickable
+from res.font.font import fonts
 
 
 def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60):
     clock = pygame.time.Clock()
     width, height = screen.get_width(), screen.get_height()
-    fonts = [pygame.font.Font("./res/font/D2Coding-Ver1.3.2-20180524.ttf", 6 * i) for i in range(10)]
-    
+
     # 상태
     scanning = False
     connecting = False
@@ -112,6 +112,8 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
 
     while not interface.check_ready():
         for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                quit()
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 Clickable.spread_click(pygame.mouse.get_pos())
             if event.type == pygame.KEYDOWN:
