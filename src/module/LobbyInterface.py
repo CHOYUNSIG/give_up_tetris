@@ -26,12 +26,6 @@ class LobbyInterface:
     def start(self) -> None:
         self.__socket.start("0.0.0.0", tetris_port)
 
-    def change_name(self, name: str) -> bool:
-        if self.__socket.get_opposite() is not None:
-            return False
-        self.__name = name
-        return True
-
     def scan_server(self) -> None:
         self.__scanner.scan(tetris_port)
 
@@ -85,11 +79,17 @@ class LobbyInterface:
         self.__lock.release()
         return result
 
-    def check_disconnect(self) -> None:
-        if not self.__is_server and self.__socket.get_opposite() is None:
+    def check_connect(self) -> bool:
+        opposite = self.__socket.get_opposite()
+        if opposite is not None:
+            return True
+        if not self.__is_server and opposite is None:
             self.__is_server = True
+            self.__ready = False
+            self.__opposite_ready = False
             self.__socket = PairServerSocket(self.__name)
             self.__set_socket()
+        return False
 
     def get_socket(self) -> tuple[PS, bool]:
         return self.__socket, self.__is_server

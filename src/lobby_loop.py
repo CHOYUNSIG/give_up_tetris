@@ -50,16 +50,6 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
             return
         interface.connect_server(selected_ip)
 
-    def select_server(index: int) -> None:
-        nonlocal selected_ip
-        new_ip = interface.get_serverlist()[index]
-        if new_ip == selected_ip:
-            selected_ip = None
-            server_btn_list[index].change_color(Color.white.value)
-        else:
-            selected_ip = new_ip
-            server_btn_list[index].change_color(Color.green.value)
-
     # 선언
     ready_btn = EdgeButton(
         (width // 2, height - 100),
@@ -163,10 +153,17 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
 
         now = monotonic_ns()
         if now - last_disconnect_check_time > disconnect_check_gap_ns:
-            interface.check_disconnect()
+            if not interface.check_connect():
+                ready_btn.change_color(Color.white.value)
             last_disconnect_check_time = now
 
         clock.tick(fps)
+
+    ready_btn.kill()
+    connect_btn.kill()
+    scan_btn.kill()
+    for server_btn in server_btn_list:
+        server_btn.kill()
 
 
 if __name__ == "__main__":
