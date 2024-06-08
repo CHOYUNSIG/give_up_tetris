@@ -160,6 +160,7 @@ class PairClientSocket(PairSocket):
                 sock.connect((ip, port))
                 sock.settimeout(None)
                 with self._lock:
+                    self.__connecting = False
                     self._socket = sock
                 self._message_handler()
             except OSError:
@@ -167,6 +168,7 @@ class PairClientSocket(PairSocket):
             finally:
                 with self._lock:
                     self.__connecting = False
+                    self._socket = None
 
         Thread(target=connect, daemon=True).start()
 
