@@ -1,6 +1,6 @@
 import socket
 import struct
-from threading import Thread, Lock
+from threading import Thread, Lock, Semaphore
 import netifaces
 from time import sleep
 from pickle import dumps, loads
@@ -8,7 +8,7 @@ from pickle import dumps, loads
 
 class ServerScanner:
     class ServerScanThread(Thread):
-        def __init__(self, ip: int | str, port: int, timeout: float = 0.1):
+        def __init__(self, ip: int | str, port: int, timeout: float = 1):
             """
             로컬 네트워크 서버 스캔 스레드
             :param ip: IP 주소
@@ -49,19 +49,19 @@ class ServerScanner:
         self.__server_list: list[tuple[str, int, str]] | None = []  # IP, port, 이름
         self.__lock = Lock()
 
-    def scan(self, port: int) -> None:
+    def scan(self, port: int, sem: Semaphore | None = None) -> None:
         """
         비동기적으로 스캔을 수행한다.
         """
-        self.__lock.acquire()
-        scanning = self.__scanning
-        self.__lock.release()
+        with self.__lock:
+            scanning = self.__scanning
         if scanning:
             return
-        self.__lock.acquire()
-        self.__scanning = True
-        self.__server_list = None
-        self.__lock.release()
+        with self.__lock:
+            self.__scanning = True
+            self.__server_list = None
+        if sem is not None:
+            sem.release()
 
         def scanning() -> None:
             threads: list[ServerScanner.ServerScanThread] = []
@@ -72,10 +72,9 @@ class ServerScanner:
                     threads.append(thread)
                     thread.start()
             server_list = list(filter(lambda x: x is not None, [thread.join() for thread in threads]))
-            self.__lock.acquire()
-            self.__server_list = server_list.copy()
-            self.__scanning = False
-            self.__lock.release()
+            with self.__lock:
+                self.__server_list = server_list.copy()
+                self.__scanning = False
 
         Thread(target=scanning, daemon=True).start()
 
@@ -85,13 +84,20 @@ class ServerScanner:
         :return: (IP 주소, 포트 번호, 이름) 튜플들이 담긴 튜플을 반환하며, 스캔 중일 경우 None을 반환한다.
         """
         sleep(0)
-        self.__lock.acquire()
-        if self.__server_list is None:
-            server_list = None
-        else:
-            server_list = self.__server_list.copy()
-        self.__lock.release()
-        return server_list
+        with self.__lock:
+            if self.__server_list is None:
+                return None
+            else:
+                return self.__server_list.copy()
+
+    def is_scanning(self) -> bool:
+        """
+        서버를 스캔 중인지를 반환한다.
+        :return: 스캔 중이면 True, 그렇지 않으면 False를 반환한다.
+        """
+        sleep(0)
+        with self.__lock:
+            return self.__scanning
 
 
 def get_iface_list() -> list[tuple[int, int]]:

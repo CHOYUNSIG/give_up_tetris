@@ -4,6 +4,7 @@ from src.network.ServerScanner import ServerScanner
 from typing import Final
 from threading import Lock
 from collections import deque
+from threading import Semaphore
 
 
 class LobbyInterface:
@@ -26,8 +27,11 @@ class LobbyInterface:
     def start(self) -> None:
         self.__socket.start("0.0.0.0", tetris_port)
 
-    def scan_server(self) -> None:
-        self.__scanner.scan(tetris_port)
+    def scan_server(self, sem: Semaphore | None = None) -> None:
+        self.__scanner.scan(tetris_port, sem)
+
+    def is_scanning(self) -> bool:
+        return self.__scanner.is_scanning()
 
     def get_serverlist(self) -> list[tuple[str, str]] | None:
         serverlist = self.__scanner.get_server_list()
@@ -39,21 +43,37 @@ class LobbyInterface:
                 result.append((name, ip))
         return result
 
-    def connect_server(self, ip: str) -> None:
-        if self.__is_server:
-            self.__is_server = False
-            self.__socket = PairClientSocket(self.__name)
-            self.__set_socket()
-        self.__socket.start(ip, tetris_port)
+    def connect_server(self, ip: str, sem: Semaphore | None = None) -> None:
+        self.__is_server = False
+
+        def on_disconnected() -> None:
+            with self.__lock:
+                self.__is_server = True
+                self.__ready = False
+                self.__opposite_ready = False
+                self.__socket = PairServerSocket(self.__name)
+                self.__set_socket()
+                self.__socket.start("0.0.0.0", tetris_port)
+
+        self.__socket = PairClientSocket(self.__name, on_disconnected)
+        self.__set_socket()
+        self.__socket.start(ip, tetris_port, sem)
+
+    def is_connecting(self) -> bool:
+        if isinstance(self.__socket, PairClientSocket):
+            return self.__socket.is_connecting()
+        else:
+            return False
+
+    def is_connected(self) -> bool:
+        return self.__socket.is_connected()
 
     def get_opposite(self) -> str | None:
         return self.__socket.get_opposite()
 
     def get_chatlist(self) -> list[tuple[str, str]]:
-        self.__lock.acquire()
-        result = list(self.__chatlist)
-        self.__lock.release()
-        return result
+        with self.__lock:
+            return list(self.__chatlist)
 
     def send_chat(self, chat: str) -> None:
         self.__add_chat(self.__name, chat)
@@ -74,32 +94,17 @@ class LobbyInterface:
         return self.__ready
 
     def check_ready(self) -> bool:
-        self.__lock.acquire()
-        result = self.__ready and self.__opposite_ready
-        self.__lock.release()
-        return result
-
-    def check_connect(self) -> bool:
-        opposite = self.__socket.get_opposite()
-        if opposite is not None:
-            return True
-        if not self.__is_server and opposite is None:
-            self.__is_server = True
-            self.__ready = False
-            self.__opposite_ready = False
-            self.__socket = PairServerSocket(self.__name)
-            self.__set_socket()
-        return False
+        with self.__lock:
+            return self.__ready and self.__opposite_ready
 
     def get_socket(self) -> tuple[PS, bool]:
         return self.__socket, self.__is_server
 
     def __add_chat(self, name: str, chat: str) -> None:
-        self.__lock.acquire()
-        self.__chatlist.append((name, chat))
-        if len(self.__chatlist) > self.__chat_bufsize:
-            self.__chatlist.popleft()
-        self.__lock.release()
+        with self.__lock:
+            self.__chatlist.append((name, chat))
+            if len(self.__chatlist) > self.__chat_bufsize:
+                self.__chatlist.popleft()
 
     def __set_socket(self) -> None:
         def recv_chat(msg: Message) -> Message:
@@ -107,15 +112,13 @@ class LobbyInterface:
             return Tmt.chat_r, None
 
         def ready_or_not(msg: Message) -> Message:
-            self.__lock.acquire()
-            if msg[0] == Tmt.ready:
-                self.__opposite_ready = True
-                self.__lock.release()
-                return Tmt.ready_r, None
-            if msg[0] == Tmt.busy:
-                self.__opposite_ready = False
-                self.__lock.release()
-                return Tmt.busy_r, None
+            with self.__lock:
+                if msg[0] == Tmt.ready:
+                    self.__opposite_ready = True
+                    return Tmt.ready_r, None
+                if msg[0] == Tmt.busy:
+                    self.__opposite_ready = False
+                    return Tmt.busy_r, None
 
         if not self.__is_server:
             def not_ready(msg: Message) -> Message:

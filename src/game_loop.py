@@ -1,18 +1,17 @@
 import pygame
-from src.module.TetrisInterface import TI
-from src.module.Tetris import TetrisMap
+
 from res.color import Color
+from src.module.Tetris import TetrisMap
+from src.module.TetrisInterface import TI
 
 keys = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_SPACE)
 
 
-def game_loop(screen: pygame.Surface, interface: TI, me: str, peer: str, fps: int = 60) -> None:
+def game_loop(screen: pygame.Surface, interface: TI, fps: int = 60) -> None:
     """
     테트리스 게임 루프
     :param screen: Pygame 스크린 객체
     :param interface: TetrisInterface 객체
-    :param me: 플레이어 이름
-    :param peer: 동료 플레이어 이름
     :param fps: 주사율
     """
     clock = pygame.time.Clock()
@@ -38,8 +37,8 @@ def game_loop(screen: pygame.Surface, interface: TI, me: str, peer: str, fps: in
         interface.update()
 
         tetris_map = interface.get_map()
-        my_pos = interface.get_position(me)
-        peer_pos = interface.get_position(peer)
+        my_pos = interface.get_position(interface.get_name())
+        peer_pos = interface.get_position(interface.get_opposite())
         score = interface.get_score()
         queue = interface.get_queue()
 
@@ -65,11 +64,10 @@ def game_loop(screen: pygame.Surface, interface: TI, me: str, peer: str, fps: in
 
 
 if __name__ == "__main__":
-    from src.network.PairSocket import *
+    from src.network.PairSocket import PairClientSocket, PairServerSocket
     from src.network.protocol import tetris_port
     from src.network.ServerScanner import ServerScanner
     from src.module.TetrisInterface import TetrisServerInterface, TetrisClientInterface
-    from time import sleep
     import pygame
     from random import choice
     from threading import Thread
@@ -124,7 +122,7 @@ if __name__ == "__main__":
     side = True
     if side:
         Thread(target=pseudo_loop, args=(server_system,), daemon=True).start()
-        game_loop(screen, client_system, client, server)
+        game_loop(screen, client_system)
     else:
         Thread(target=pseudo_loop, args=(client_system,), daemon=True).start()
-        game_loop(screen, server_system, server, client)
+        game_loop(screen, server_system)

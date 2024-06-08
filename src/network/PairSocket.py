@@ -2,7 +2,7 @@ import socket
 from abc import ABC, abstractmethod
 from enum import IntEnum, unique
 from pickle import dumps, loads
-from threading import Thread, Lock
+from threading import Thread, Lock, Semaphore
 from time import sleep
 from typing import Type, Callable, TypeVar, Final
 
@@ -22,15 +22,15 @@ Message = tuple[MTI, any]  # 메시지의 정의
 
 
 class PairSocket(ABC):
-    def __init__(self, name: str):
+    def __init__(self, name: str, on_disconnected: Callable[[], None] | None = None):
         """
         요청-응답 형식의 스레드 안정성 소켓
         """
         self._name: Final[str] = name
         self._socket: socket.socket | None = None
         self._handler_map: dict[MTI, Callable[[Message], Message]] = {}
-        self.__response: dict[MTI, Message] = {}
         self._lock = Lock()
+        self.__response: dict[MTI, Message] = {}
 
         def introduce(msg: Message) -> Message:
             self._opposite_name = msg[1]
@@ -38,7 +38,7 @@ class PairSocket(ABC):
 
         self._handler_map[-1] = introduce
 
-        def receive() -> None:
+        def message_handler() -> None:
             try:
                 while True:
                     packet = self._socket.recv(4096)
@@ -46,31 +46,29 @@ class PairSocket(ABC):
                         break
                     msg: Message = loads(packet)
                     msgtype, body = msg
-                    self._lock.acquire()
-                    if msgtype in self._handler_map:  # 요청 메시지일 시
-                        self._socket.send(dumps(self._handler_map[msgtype](msg)))
-                    else:  # 응답 메시지일 시
-                        self.__response[msgtype] = msg
-                    self._lock.release()
+                    with self._lock:
+                        if msgtype in self._handler_map:  # 요청 메시지일 시
+                            self._socket.send(dumps(self._handler_map[msgtype](msg)))
+                        else:  # 응답 메시지일 시
+                            self.__response[msgtype] = msg
             except OSError:
-                try:
-                    self._lock.release()
-                except RuntimeError:
-                    pass
+                pass
             finally:
-                self._lock.acquire()
-                self._socket.close()
-                self._socket = None
-                self._lock.release()
+                with self._lock:
+                    self._socket.close()
+                    self._socket = None
+                if on_disconnected is not None:
+                    on_disconnected()
 
-        self._message_handler = receive
+        self._message_handler = message_handler
 
     @abstractmethod
-    def start(self, ip: str, port: int) -> None:
+    def start(self, ip: str, port: int, sem: Semaphore | None = None) -> None:
         """
         소켓을 시작한다.
         :param ip: IP 주소
         :param port: 포트 번호
+        :param sem: 서버 시작을 기다리기 위한 잠금
         """
         pass
 
@@ -91,6 +89,15 @@ class PairSocket(ABC):
             return None
         return result[1]
 
+    def is_connected(self) -> bool:
+        """
+        연결되어있는지를 확인한다.
+        :return: 연결되어있다면 True, 그렇지 않으면 False를 반환한다.
+        """
+        sleep(0)
+        with self._lock:
+            return self._socket is not None
+
     def request(self, msg: Message, response_type: MTI) -> Message | None:
         """
         메시지를 보내고 응답을 받은 뒤 반환한다.
@@ -99,23 +106,16 @@ class PairSocket(ABC):
         :return: 응답 메시지 객체
         """
         try:
-            self._lock.acquire()
-            self._socket.send(dumps(msg))
-            self._lock.release()
+            with self._lock:
+                self._socket.send(dumps(msg))
             while True:
-                self._lock.acquire()
-                if response_type in self.__response:
-                    result = self.__response[response_type]
-                    self.__response.pop(response_type)
-                    return result
-                self._lock.release()
+                with self._lock:
+                    if response_type in self.__response:
+                        result = self.__response[response_type]
+                        self.__response.pop(response_type)
+                        return result
         except (OSError, AttributeError):
             return None
-        finally:
-            try:
-                self._lock.release()
-            except RuntimeError:
-                pass
 
     def enroll(self, msgtype: Type[MTI], handler: Callable[[Message], Message]) -> None:
         """
@@ -124,85 +124,80 @@ class PairSocket(ABC):
         :param handler: 핸들러 함수
         """
         sleep(0)
-        self._lock.acquire()
-        self._handler_map[msgtype] = handler
-        self._lock.release()
+        with self._lock:
+            self._handler_map[msgtype] = handler
 
 
 PS = TypeVar("PS", bound=PairSocket)
 
 
 class PairClientSocket(PairSocket):
-    def __init__(self, name: str):
+    def __init__(self, name: str, on_disconnected: Callable[[], None] | None = None):
         """
         쿨라이언트 소켓
         """
-        super().__init__(name)
+        super().__init__(name, on_disconnected)
         self.__connecting = False
 
-    def start(self, ip: str, port: int, timeout: float = 1 / 60) -> None:
-        """
-        클라이언트 소켓을 시작한다.
-        :param ip: IP 주소
-        :param port: 포트 번호
-        :param timeout: 연결 설정 시간
-        """
+    def start(self, ip: str, port: int, sem: Semaphore | None = None) -> None:
         sleep(0)
-        self._lock.acquire()
-        connecting = self.__connecting
-        self._lock.release()
+        with self._lock:
+            connecting = self.__connecting
         connecting |= self.get_opposite() is not None
         if connecting:
             return
-        self._lock.acquire()
-        self.__connecting = True
-        self._lock.release()
+        with self._lock:
+            self.__connecting = True
+        if sem is not None:
+            sem.release()
 
         def connect() -> None:
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2 ** 20)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 ** 20)
-                sock.settimeout(timeout)
+                sock.settimeout(1)
                 sock.connect((ip, port))
                 sock.settimeout(None)
-                self._lock.acquire()
-                self._socket = sock
-                self._lock.release()
+                with self._lock:
+                    self._socket = sock
                 self._message_handler()
             except OSError:
                 pass
             finally:
-                self._lock.acquire()
-                self.__connecting = False
-                self._lock.release()
+                with self._lock:
+                    self.__connecting = False
 
         Thread(target=connect, daemon=True).start()
 
+    def is_connecting(self) -> bool:
+        """
+        소켓이 연결 중인지를 확인한다.
+        :return: 연결 중이면 True, 그렇지 않으면 False를 반환한다.
+        """
+        sleep(0)
+        with self._lock:
+            return self.__connecting
+
 
 class PairServerSocket(PairSocket):
-    def __init__(self, name: str):
+    def __init__(self, name: str, on_disconnected: Callable[[], None] | None = None):
         """
         서버 소켓
         """
-        super().__init__(name)
+        super().__init__(name, on_disconnected)
         self.__started = False
 
-    def start(self, ip: str, port: int) -> None:
-        """
-        서버 소켓을 시작한다.
-        :param ip: IP 주소
-        :param port: 포트 번호
-        """
+    def start(self, ip: str, port: int, sem: Semaphore | None = None) -> None:
         sleep(0)
-        self._lock.acquire()
-        started = self.__started
-        self._lock.release()
+        with self._lock:
+            started = self.__started
         if started:
             return
-        self._lock.acquire()
-        self.__started = True
-        self._lock.release()
+        with self._lock:
+            self.__started = True
+        if sem is not None:
+            sem.release()
 
         def accept() -> None:
             listner = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -212,9 +207,8 @@ class PairServerSocket(PairSocket):
                 sock, _ = listner.accept()
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2 ** 20)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 ** 20)
-                self._lock.acquire()
-                self._socket = sock
-                self._lock.release()
+                with self._lock:
+                    self._socket = sock
                 self._message_handler()
 
         Thread(target=accept, daemon=True).start()
@@ -246,7 +240,7 @@ if __name__ == "__main__":
             break
 
     def echo(msg: Message) -> Message:
-        return msg
+        return TetrisMessageType.chat_r, msg[1]
     s.enroll(TetrisMessageType.chat, echo)
 
     m = c.request((TetrisMessageType.chat, "hello"), TetrisMessageType.chat_r)

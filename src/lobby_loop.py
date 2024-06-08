@@ -5,7 +5,7 @@ from src.util.keymap import keymap
 from res.string import String
 from res.color import Color
 from typing import Final
-from time import monotonic_ns
+from threading import Semaphore
 
 disconnect_check_gap_ns: Final[int] = 10 ** 9
 
@@ -19,9 +19,9 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
     done = False
     chating = ""
     scanning = False
+    connecting = False
     selected_ip: str | None = None
-    last_disconnect_check_time = monotonic_ns()
-    
+
     # 버튼
     ready_btn: EdgeButton
     scan_btn: EdgeButton
@@ -30,6 +30,8 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
     
     # 콜백
     def toggle_ready() -> None:
+        if interface.get_opposite() is None:
+            return
         ready = interface.toggle_ready()
         if ready:
             ready_btn.change_color(Color.green.value)
@@ -40,15 +42,25 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
         nonlocal scanning
         if scanning:
             return
-        interface.scan_server()
+        sem = Semaphore()
+        sem.acquire()
         scanning = True
+        interface.scan_server(sem)
+        sem.acquire()
         scan_btn.change_text(String.scanning.value + "...")
         scan_btn.change_color(Color.lightgrey.value)
 
     def connect() -> None:
+        nonlocal connecting
         if selected_ip is None:
             return
-        interface.connect_server(selected_ip)
+        sem = Semaphore()
+        sem.acquire()
+        connecting = True
+        interface.connect_server(selected_ip, sem)
+        sem.acquire()
+        connect_btn.change_text(String.connecting.value + "...")
+        connect_btn.change_color(Color.lightgrey.value)
 
     # 선언
     ready_btn = EdgeButton(
@@ -101,16 +113,15 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
                     chating = ""
 
         chat_list = interface.get_chatlist()
-        server_list = interface.get_serverlist()
 
-        if server_list is not None and scanning:
+        if scanning and not interface.is_scanning():
             scanning = False
             scan_btn.change_text(String.scan.value)
             scan_btn.change_color(Color.white.value)
             for server_btn in server_btn_list:
                 server_btn.kill()
             server_btn_list = []
-            for index, (name, ip) in enumerate(server_list):
+            for index, (name, ip) in enumerate(interface.get_serverlist()):
 
                 def callback() -> None:
                     nonlocal selected_ip
@@ -132,6 +143,18 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
                 ))
                 server_btn_list[-1].activate()
 
+        if connecting and not interface.is_connecting():
+            connecting = False
+            connect_btn.change_text(String.connect.value)
+            connect_btn.change_color(Color.white.value)
+            if interface.get_opposite() is None:
+                for server_btn in server_btn_list:
+                    server_btn.kill()
+                server_btn_list = []
+
+        if not interface.is_connected():
+            ready_btn.change_color(Color.white.value)
+
         screen.fill((0, 0, 0))
         Button.spread_draw(screen)
         screen.blit(
@@ -149,13 +172,7 @@ def lobby_loop(screen: pygame.Surface, interface: LobbyInterface, fps: int = 60)
         pygame.display.update()
 
         if interface.check_ready():
-            break
-
-        now = monotonic_ns()
-        if now - last_disconnect_check_time > disconnect_check_gap_ns:
-            if not interface.check_connect():
-                ready_btn.change_color(Color.white.value)
-            last_disconnect_check_time = now
+            done = True
 
         clock.tick(fps)
 
