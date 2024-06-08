@@ -79,25 +79,25 @@ class TetrisServerInterface(TetrisInterface):
         self.__tetris = Tetris(socket.get_name(), self.get_opposite())
 
         def send_data(msg: Message) -> Message:
-            if msg[0] == Tmt.map_req:
-                return Tmt.map, self.get_map()
-            if msg[0] == Tmt.score_req:
-                return Tmt.score, self.get_score()
-            if msg[0] == Tmt.queue_req:
-                return Tmt.queue, self.get_queue()
-            if msg[0] == Tmt.pos_req:
-                return Tmt.pos, (msg[1], self.get_position(msg[1]))
-            if msg[0] == Tmt.all_req:
-                response = {}
-                with self._lock:
-                    response[Tmt.map] = self.__tetris.get_map()
-                    response[Tmt.score] = self.__tetris.get_score()
-                    response[Tmt.queue] = self.__tetris.get_queue()
-                    response[Tmt.pos] = {
-                        self._socket.get_name(): self.__tetris.get_position(self._socket.get_name()),
-                        self.get_opposite(): self.__tetris.get_position(self.get_opposite()),
+            with self._lock:
+                if msg[0] == Tmt.map_req:
+                    return Tmt.map, self.get_map()
+                if msg[0] == Tmt.score_req:
+                    return Tmt.score, self.get_score()
+                if msg[0] == Tmt.queue_req:
+                    return Tmt.queue, self.get_queue()
+                if msg[0] == Tmt.pos_req:
+                    return Tmt.pos, (msg[1], self.get_position(msg[1]))
+                if msg[0] == Tmt.all_req:
+                    return Tmt.all, {
+                        Tmt.map: self.__tetris.get_map(),
+                        Tmt.score: self.__tetris.get_score(),
+                        Tmt.queue: self.__tetris.get_queue(),
+                        Tmt.pos: {
+                            self._socket.get_name(): self.__tetris.get_position(self._socket.get_name()),
+                            self._socket.get_opposite(): self.__tetris.get_position(self._socket.get_opposite()),
+                        }
                     }
-                return Tmt.all, response
 
         def recv_ctrl(msg: Message) -> Message:
             for ctrl, callback in [

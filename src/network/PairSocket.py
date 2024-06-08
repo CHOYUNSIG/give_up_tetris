@@ -50,13 +50,17 @@ class PairSocket(ABC):
                     msg: Message = loads(packet)
                     msgtype, body = msg
                     print("got : " + str(msg))
+                    handler: Callable[[Message], Message] | None = None
                     with self._lock:
                         if msgtype in self._handler_map:  # 요청 메시지일 시
-                            response = self._handler_map[msgtype](msg)
-                            print("give : " + str(response))
-                            self._socket.send(dumps(response))
+                            handler = self._handler_map[msgtype]
                         else:  # 응답 메시지일 시
                             self.__response[msgtype] = msg
+                    if handler is not None:
+                        response = handler(msg)
+                        with self._lock:
+                            print("give : " + str(response))
+                            self._socket.send(dumps(response))
             except OSError:
                 pass
             finally:
@@ -113,9 +117,7 @@ class PairSocket(ABC):
             while True:
                 with self._lock:
                     if response_type in self.__response:
-                        result = self.__response[response_type]
-                        self.__response.pop(response_type)
-                        return result
+                        return self.__response.pop(response_type)
         except (OSError, AttributeError):
             return None
 
@@ -216,6 +218,7 @@ class PairServerSocket(PairSocket):
                 sock, _ = listner.accept()
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2 ** 20)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 ** 20)
+                sock.settimeout(None)
                 with self._lock:
                     self._socket = sock
                 self._message_handler()
